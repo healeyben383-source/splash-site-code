@@ -1,3 +1,9 @@
+/* SPLASH FOOTER JS — V22.8
+   Baseline: V22.7 (Pinned: 57fe6c2)
+   Changes: (1) No-change submit guard (prevents timestamp + global churn)
+            (2) Anti-junk validation gate (prevents global pollution)
+*/
+
 document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
@@ -132,15 +138,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!error && data && data[0] && data[0].created_at) {
         const formatted = formatIso(data[0].created_at);
         if (formatted) {
-          // Optional: cache locally for speed / offline fallback
           try { localStorage.setItem(`splash_island_captured_at_${listId}`, data[0].created_at); } catch(e) {}
           setUI(formatted);
           return;
         }
       }
-    } catch(e) {
-      // continue to fallback
-    }
+    } catch(e) {}
 
     // 2) Fallback: local cached value (legacy behavior) but does NOT advance once set
     try {
@@ -731,7 +734,6 @@ document.addEventListener('DOMContentLoaded', () => {
       panel.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
     }
 
-    // Fail-safe unlock if sheet is hidden without hideOpenDialog()
     const mo = new MutationObserver(() => {
       const hiddenByAria = sheet.getAttribute('aria-hidden') === 'true';
       const hiddenByStyle = sheet.style.display === 'none' || getComputedStyle(sheet).display === 'none';
@@ -753,8 +755,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     b.style.overflow = 'hidden';
     h.style.overflow = 'hidden';
-
-    // touchAction helps on iOS/touch; safe to restore via dataset
     b.style.touchAction = 'none';
   }
 
@@ -810,7 +810,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (aUrl) body.appendChild(mkRow(aLabel || 'Link 1', aUrl));
     if (bUrl) body.appendChild(mkRow(bLabel || 'Link 2', bUrl));
 
-    // Always include an in-modal Cancel for redundancy
     const cancelRow = document.createElement('div');
     cancelRow.className = 'di-open-row';
     const cancelLbl = document.createElement('div');
@@ -841,7 +840,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
-  // Delegated OPEN handler (buttons with [data-di-open])
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -855,7 +853,6 @@ document.addEventListener('DOMContentLoaded', () => {
     showOpenDialog(links || {});
   });
 
-  // Universal close-catch (capture phase) — catches any close icon variant
   document.addEventListener('pointerdown', (e) => {
     const t = e.target;
     if (!t) return;
@@ -879,7 +876,6 @@ document.addEventListener('DOMContentLoaded', () => {
     hideOpenDialog();
   }, true);
 
-  // ESC close
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideOpenDialog();
   });
@@ -1049,6 +1045,69 @@ document.addEventListener('DOMContentLoaded', () => {
       updatedAt: new Date().toISOString()
     };
     try { localStorage.setItem(globalAppliedKey(category), JSON.stringify(payload)); } catch (e) {}
+  }
+
+  /* =========================
+     V22.8 — ANTI-JUNK VALIDATION (NEW)
+  ========================== */
+  function isProbablyUrlOrEmail(s){
+    const t = String(s || '').trim().toLowerCase();
+    if (!t) return false;
+    if (/\bhttps?:\/\//i.test(t)) return true;
+    if (/\bwww\./i.test(t)) return true;
+    if (/\S+@\S+\.\S+/.test(t)) return true;
+    return false;
+  }
+
+  function isObviousJunkToken(s){
+    const t = String(s || '').trim().toLowerCase();
+    if (!t) return true;
+
+    const banned = new Set(['test','testing','asdf','qwerty','aaa','bbb','ccc','123','1234','12345','lol','haha']);
+    if (banned.has(t)) return true;
+
+    // 5+ same char (e.g., "aaaaa", ".....", "!!!!!")
+    if (/^(.)\1{4,}$/.test(t)) return true;
+
+    // mostly non-letters/numbers
+    const alnumCount = (t.match(/[a-z0-9]/g) || []).length;
+    if (alnumCount < Math.min(2, t.length)) {
+      // allow small legit items like "It" (2 letters). This catches things like "----" or "!!"
+      if (t.length >= 3) return true;
+    }
+
+    return false;
+  }
+
+  function validateTop5(values){
+    const cleaned = values.map(v => String(v || '').trim());
+    const nonEmpty = cleaned.filter(Boolean);
+
+    if (nonEmpty.length === 0) {
+      return { ok:false, msg:'Please enter at least one item before submitting.' };
+    }
+
+    for (const v of nonEmpty){
+      if (v.length < 2) return { ok:false, msg:'Entries must be at least 2 characters.' };
+      if (v.length > 80) return { ok:false, msg:'Please keep each entry under 80 characters.' };
+      if (isProbablyUrlOrEmail(v)) return { ok:false, msg:'Please enter item names only (no links or email addresses).' };
+      if (isObviousJunkToken(v)) return { ok:false, msg:'Please remove placeholder/junk entries and use real item names.' };
+
+      const canon = canonicalFromDisplay(v);
+      if (!canon) return { ok:false, msg:'One of your entries looks invalid after formatting. Please adjust it and try again.' };
+    }
+
+    return { ok:true, msg:'' };
+  }
+
+  /* =========================
+     V22.8 — NO-CHANGE GUARD HELPERS (NEW)
+  ========================== */
+  function valuesEqualRow(row, values){
+    if (!row) return false;
+    const rowVals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
+    const newVals = values.map(v => String(v || '').trim());
+    return rowVals.join('||') === newVals.join('||');
   }
 
   /* =========================
@@ -1261,10 +1320,44 @@ document.addEventListener('DOMContentLoaded', () => {
         (formEl.querySelector(`input[name="rank${i}"]`)?.value || '').trim()
       );
 
+      // Keep your local snapshot behavior (unchanged)
       saveLastList(category, newValues);
 
+      // V22.8: anti-junk gate (NEW)
+      const verdict = validateTop5(newValues);
+      if (!verdict.ok) {
+        alert(verdict.msg);
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.value = originalBtnValue || 'Submit';
+        }
+        return;
+      }
+
       try {
-        // Upsert list
+        // V22.8: no-change guard (NEW)
+        // If the DB already has this exact list, do NOT upsert, do NOT touch globals, do NOT change timestamps.
+        const { data: existingRow, error: readErr } = await supabase
+          .from('lists')
+          .select('v1,v2,v3,v4,v5')
+          .eq('user_id', listId)
+          .eq('category', category)
+          .maybeSingle();
+
+        // If read fails, we do not block saving (fail-open) — we proceed to upsert.
+        if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
+          // Ensure local applied snapshot stays aligned (optional but harmless)
+          // We do NOT write to global_items.
+          saveGlobalApplied(category, newValues);
+
+          window.location.href =
+            window.location.origin +
+            RESULTS_PATH +
+            `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(listId)}`;
+          return;
+        }
+
+        // Upsert list (unchanged)
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1279,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // Global diff baseline from local "applied snapshot"
+        // Global diff baseline from local "applied snapshot" (unchanged)
         const appliedOld = loadGlobalApplied(category);
         const oldValuesForGlobal = appliedOld ? appliedOld : [];
 
@@ -1305,4 +1398,4 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
-});                      
+});
