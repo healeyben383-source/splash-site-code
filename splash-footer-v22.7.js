@@ -1140,6 +1140,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setResultsCopy();
 
+    // RESULTS Reflection block (locked copy)
+const setResultsReflectionCopy = () => {
+  const el = document.getElementById('resultsReflectionCopy');
+  if (!el) return;
+
+  el.innerHTML =
+    `Because the hardest part of Splash isn’t choosing five things — it’s living with your answers.` +
+    `<br><br>` +
+    `You didn’t make this list for likes, approval, or explanation.` +
+    `<br>` +
+    `You made it because these choices say something about who you are — right now.` +
+    `<br><br>` +
+    `Over time, you’ll want to come back and change it.` +
+    `<br>` +
+    `Not because it was wrong — but because you moved on.` +
+    `<br><br>` +
+    `And that’s the point.`;
+};
+
+setResultsReflectionCopy();
+
     (async () => {
       const category = urlParams.get('category') || '';
       const userList = document.getElementById('userList');
