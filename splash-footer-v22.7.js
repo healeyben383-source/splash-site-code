@@ -1,3 +1,8 @@
+// BASELINE — Global submit guard + junk filter verified (Jan 2026)
+// - No-change submits do not update timestamps
+// - Junk input is blocked from polluting global_items
+// Safe rollback anchor
+
 /* SPLASH FOOTER JS — V22.8
    Baseline: V22.7 (Pinned: 57fe6c2)
    Changes: (1) No-change submit guard (prevents timestamp + global churn)
