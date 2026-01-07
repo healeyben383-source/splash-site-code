@@ -7,6 +7,7 @@
    Baseline: V22.8
    Changes: (3) Share Button Ownership Lock (prevents resharing someone else’s island)
             (4) Separate viewerListId (local identity) from islandListId (URL identity on /island)
+   Links:    Updated resolveLinks() to locked 2-link map per category (Jan 2026)
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -646,6 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      LINK RESOLVER (NO SPOTIFY API)
+     (UPDATED TO LOCKED 2-LINK MAP)
   ========================== */
   function parseTitleArtist(raw) {
     const s = (raw || '').trim();
@@ -674,23 +676,88 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const google = (q) => `https://www.google.com/search?q=${enc(q)}`;
     const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=${enc(q)}`;
+    const youtube= (q) => `https://www.youtube.com/results?search_query=${enc(q)}`;
 
+    // --- MUSIC: Spotify + Apple Music (locked) ---
     if (parent === 'music') {
       const plain = (artist ? `${title} ${artist}` : title).trim();
-      if (sub === 'albums') return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
-      if (sub === 'songs')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
-      if (sub === 'artists')return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
-      return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(title)}`, bLabel:'Google', bUrl: google(`${title} music`) };
+      if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
+      if (sub === 'songs')   return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
+      if (sub === 'artists') return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
+      return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
-    if (parent === 'movies') return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} movie`) };
-    if (parent === 'books')  return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Google Books', bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}` };
-    if (parent === 'tv')     return { aLabel:'JustWatch', aUrl:`https://www.justwatch.com/search?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
-    if (parent === 'travel') return { aLabel:'Maps', aUrl: maps(title), bLabel:'Google', bUrl: google(`${title} travel`) };
-    if (parent === 'food')   return { aLabel:'Maps', aUrl: maps(title), bLabel:'Google', bUrl: google(`${title} recipe`) };
-    if (parent === 'cars')   return { aLabel:'Wikipedia', aUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} car`) };
-    if (parent === 'games')  return { aLabel:'Steam', aUrl:`https://store.steampowered.com/search/?term=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} game`) };
+    // --- MOVIES: IMDb + TMDB (locked) ---
+    if (parent === 'movies') {
+      return {
+        aLabel:'IMDb',
+        aUrl:`https://www.imdb.com/find/?q=${enc(title)}`,
+        bLabel:'TMDB',
+        bUrl:`https://www.themoviedb.org/search?query=${enc(title)}`
+      };
+    }
 
+    // --- TV: IMDb + Google Search (locked) ---
+    if (parent === 'tv') {
+      return {
+        aLabel:'IMDb',
+        aUrl:`https://www.imdb.com/find/?q=${enc(title)}`,
+        bLabel:'Google',
+        bUrl: google(`${title} tv series`)
+      };
+    }
+
+    // --- BOOKS: Goodreads + Google Books (locked) ---
+    if (parent === 'books') {
+      return {
+        aLabel:'Goodreads',
+        aUrl:`https://www.goodreads.com/search?q=${enc(title)}`,
+        bLabel:'Google Books',
+        bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}`
+      };
+    }
+
+    // --- GAMES: Metacritic + Wikipedia (locked, cross-platform) ---
+    if (parent === 'games') {
+      return {
+        aLabel:'Metacritic',
+        aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`,
+        bLabel:'Wikipedia',
+        bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}`
+      };
+    }
+
+    // --- TRAVEL: Tripadvisor + Maps (locked) ---
+    if (parent === 'travel') {
+      return {
+        aLabel:'Tripadvisor',
+        aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`,
+        bLabel:'Maps',
+        bUrl: maps(title)
+      };
+    }
+
+    // --- FOOD: Allrecipes + Google Search (locked) ---
+    if (parent === 'food') {
+      return {
+        aLabel:'Allrecipes',
+        aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`,
+        bLabel:'Google',
+        bUrl: google(`${title} recipe`)
+      };
+    }
+
+    // --- CARS: Google Search + YouTube (locked) ---
+    if (parent === 'cars') {
+      return {
+        aLabel:'Google',
+        aUrl: google(`${title} car`),
+        bLabel:'YouTube',
+        bUrl: youtube(`${title} car`)
+      };
+    }
+
+    // Fallback: keep 2 generic links
     return { aLabel:'Google', aUrl: google(title), bLabel:'Search', bUrl: google(title) };
   }
 
@@ -1125,71 +1192,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return { ok:true, msg:'' };
   }
-   
-/* =========================
-   CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (NEW)
-   - Does NOT block saving the user’s list
-   - Only determines whether an entry is allowed to affect global_items
-========================== */
-function looksLikePersonName(s){
-  const t = String(s || '').trim();
-  if (!t) return false;
 
-  // reject if digits present (cars often have digits; people usually don't)
-  if (/\d/.test(t)) return false;
+  /* =========================
+     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (NEW)
+     - Does NOT block saving the user’s list
+     - Only determines whether an entry is allowed to affect global_items
+  ========================== */
+  function looksLikePersonName(s){
+    const t = String(s || '').trim();
+    if (!t) return false;
 
-  // 2–4 words, mostly Title Case
-  const words = t.split(/\s+/).filter(Boolean);
-  if (words.length < 2 || words.length > 4) return false;
+    // reject if digits present (cars often have digits; people usually don't)
+    if (/\d/.test(t)) return false;
 
-  // avoid obvious non-name tokens
-  const stop = ['the','and','of','for','with','a','an','in','on'];
-  if (stop.includes(words[0].toLowerCase())) return false;
+    // 2–4 words, mostly Title Case
+    const words = t.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 4) return false;
 
-  // At least two words start with uppercase letters
-  const upperStarts = words.filter(w => /^[A-Z]/.test(w)).length;
-  return upperStarts >= 2;
-}
+    // avoid obvious non-name tokens
+    const stop = ['the','and','of','for','with','a','an','in','on'];
+    if (stop.includes(words[0].toLowerCase())) return false;
 
-function looksLikeCarEntry(s){
-  const t = String(s || '').trim();
-  if (!t) return false;
-
-  // common car signals
-  if (/\b(19\d{2}|20\d{2})\b/.test(t)) return true;
-  if (/\b(gt|gti|type r|rs|ss|v8|v6|turbo|supercharged|coupe|sedan|wagon|convertible)\b/i.test(t)) return true;
-
-  // known makes (high-signal list)
-  if (/\b(ford|holden|chevrolet|chevy|pontiac|dodge|plymouth|cadillac|buick|gmc|jeep|toyota|nissan|honda|mazda|subaru|bmw|mercedes|audi|volkswagen|vw|porsche|ferrari|lamborghini|jaguar|land rover|range rover|volvo|saab|alfa romeo|fiat|mini)\b/i.test(t)) return true;
-
-  return false;
-}
-
-function isGlobalEligible(category, value){
-  const parent = getParentFromCategory(category);
-  const v = String(value || '').trim();
-  if (!v) return false;
-
- // People: allow people entries, but block obvious cars
-if (parent === 'people') {
-  if (looksLikeCarEntry(v)) return false;   // prevents “1967 Ford Mustang” polluting People global
-  return true;
-}
-
-
-  // Cars: exclude obvious person names
-  if (parent === 'cars') {
-    if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
-    return true;
+    // At least two words start with uppercase letters
+    const upperStarts = words.filter(w => /^[A-Z]/.test(w)).length;
+    return upperStarts >= 2;
   }
 
-  // Travel / Food: conservative name exclusion
-  if (parent === 'travel' || parent === 'food') return true;
+  function looksLikeCarEntry(s){
+    const t = String(s || '').trim();
+    if (!t) return false;
 
+    // common car signals
+    if (/\b(19\d{2}|20\d{2})\b/.test(t)) return true;
+    if (/\b(gt|gti|type r|rs|ss|v8|v6|turbo|supercharged|coupe|sedan|wagon|convertible)\b/i.test(t)) return true;
 
-  // Everything else: allow
-  return true;
-}
+    // known makes (high-signal list)
+    if (/\b(ford|holden|chevrolet|chevy|pontiac|dodge|plymouth|cadillac|buick|gmc|jeep|toyota|nissan|honda|mazda|subaru|bmw|mercedes|audi|volkswagen|vw|porsche|ferrari|lamborghini|jaguar|land rover|range rover|volvo|saab|alfa romeo|fiat|mini)\b/i.test(t)) return true;
+
+    return false;
+  }
+
+  function isGlobalEligible(category, value){
+    const parent = getParentFromCategory(category);
+    const v = String(value || '').trim();
+    if (!v) return false;
+
+    // People: allow people entries, but block obvious cars
+    if (parent === 'people') {
+      if (looksLikeCarEntry(v)) return false;
+      return true;
+    }
+
+    // Cars: exclude obvious person names
+    if (parent === 'cars') {
+      if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
+      return true;
+    }
+
+    // Travel / Food: allow
+    if (parent === 'travel' || parent === 'food') return true;
+
+    // Everything else: allow
+    return true;
+  }
 
   /* =========================
      V22.8 — NO-CHANGE GUARD HELPERS (NEW)
@@ -1448,7 +1513,6 @@ if (parent === 'people') {
 
       try {
         // V22.8: no-change guard (NEW)
-        // If the DB already has this exact list, do NOT upsert, do NOT touch globals, do NOT change timestamps.
         const { data: existingRow, error: readErr } = await supabase
           .from('lists')
           .select('v1,v2,v3,v4,v5')
@@ -1456,13 +1520,9 @@ if (parent === 'people') {
           .eq('category', category)
           .maybeSingle();
 
-        // If read fails, we do not block saving (fail-open) — we proceed to upsert.
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
-          // Ensure local applied snapshot stays aligned (optional but harmless)
-          // We do NOT write to global_items.
-         const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
-saveGlobalApplied(category, eligibleNew);
-
+          const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
+          saveGlobalApplied(category, eligibleNew);
 
           window.location.href =
             window.location.origin +
@@ -1471,7 +1531,7 @@ saveGlobalApplied(category, eligibleNew);
           return;
         }
 
-        // Upsert list (unchanged)
+        // Upsert list
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1486,20 +1546,18 @@ saveGlobalApplied(category, eligibleNew);
 
         if (upErr) throw upErr;
 
-        // Global diff baseline from local "applied snapshot" (unchanged)
         const appliedOld = loadGlobalApplied(category);
-const oldValuesForGlobal = appliedOld ? appliedOld : [];
+        const oldValuesForGlobal = appliedOld ? appliedOld : [];
 
-const cleanNew = newValues.filter(Boolean);
-const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
+        const cleanNew = newValues.filter(Boolean);
+        const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
 
-const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
+        const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
-for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
-for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
+        for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
+        for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
 
-saveGlobalApplied(category, eligibleNew);
-
+        saveGlobalApplied(category, eligibleNew);
 
         window.location.href =
           window.location.origin +
