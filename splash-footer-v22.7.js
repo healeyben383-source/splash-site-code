@@ -3,11 +3,13 @@
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V22.9
-   Baseline: V22.8
-   Changes: (3) Share Button Ownership Lock (prevents resharing someone else’s island)
-            (4) Separate viewerListId (local identity) from islandListId (URL identity on /island)
-   Links:    Updated resolveLinks() to locked 2-link map per category (Jan 2026)
+/* SPLASH FOOTER JS — V23.1
+   Baseline: V22.9
+   Change A: Lightweight Outbound Link Analytics
+            - Inserts click events into public.link_clicks
+            - Tracks: category, canonical_id, display_name, link_slot (A/B), link_label, source (user_top5/global_top100)
+            - Fail-open + non-blocking (never delays navigation)
+   NOTE: This file is intended to replace the existing splash-footer JS in GitHub, then update the Webflow loader pin.
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -868,7 +870,29 @@ document.addEventListener('DOMContentLoaded', () => {
     delete b.dataset.__diPrevHtmlOverflow;
   }
 
-  function showOpenDialog(links){
+  /* =========================
+     A: OUTBOUND LINK ANALYTICS (NON-BLOCKING)
+  ========================== */
+  function trackOutboundClick({ category, canonical_id, display_name, link_slot, link_label, source }) {
+    try {
+      supabase
+        .from('link_clicks')
+        .insert([{
+          category,
+          canonical_id: canonical_id || null,
+          display_name: display_name || null,
+          link_slot,
+          link_label,
+          source
+        }])
+        .then(() => {})
+        .catch(() => {});
+    } catch (e) {
+      // fail open
+    }
+  }
+
+  function showOpenDialog(links, ctx){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
@@ -880,7 +904,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     body.innerHTML = '';
 
-    const mkRow = (label, url) => {
+    const mkRow = (slot, label, url) => {
       const row = document.createElement('div');
       row.className = 'di-open-row';
 
@@ -895,13 +919,27 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.target = '_blank';
       btn.rel = 'noopener noreferrer';
 
+      // A: Track outbound link clicks (fail-open, non-blocking)
+      btn.addEventListener('click', () => {
+        try {
+          trackOutboundClick({
+            category: (ctx && ctx.category) || '',
+            canonical_id: (ctx && ctx.canonical_id) || '',
+            display_name: (ctx && ctx.display_name) || '',
+            link_slot: slot,
+            link_label: String(label || ''),
+            source: (ctx && ctx.source) || ''
+          });
+        } catch (e) {}
+      }, { passive: true });
+
       row.appendChild(left);
       row.appendChild(btn);
       return row;
     };
 
-    if (aUrl) body.appendChild(mkRow(aLabel || 'Link 1', aUrl));
-    if (bUrl) body.appendChild(mkRow(bLabel || 'Link 2', bUrl));
+    if (aUrl) body.appendChild(mkRow('A', aLabel || 'Link 1', aUrl));
+    if (bUrl) body.appendChild(mkRow('B', bLabel || 'Link 2', bUrl));
 
     const cancelRow = document.createElement('div');
     cancelRow.className = 'di-open-row';
@@ -942,8 +980,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
 
+    const ctx = {
+      category: btn.getAttribute('data-di-category') || '',
+      display_name: btn.getAttribute('data-di-display') || '',
+      canonical_id: btn.getAttribute('data-di-canon') || '',
+      source: btn.getAttribute('data-di-source') || ''
+    };
+
     e.preventDefault();
-    showOpenDialog(links || {});
+    showOpenDialog(links || {}, ctx);
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -1351,6 +1396,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
+            // A: pass context into modal for click analytics
+            openBtn.setAttribute('data-di-category', category);
+            openBtn.setAttribute('data-di-display', v);
+            openBtn.setAttribute('data-di-canon', canonicalFromDisplay(v));
+            openBtn.setAttribute('data-di-source', 'user_top5');
+
             styleOpenButton(openBtn);
 
             li.appendChild(textSpan);
@@ -1439,6 +1490,12 @@ document.addEventListener('DOMContentLoaded', () => {
           const safe = (s) => (s || '').replace(/'/g, '');
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
+
+          // A: pass context into modal for click analytics
+          openBtn.setAttribute('data-di-category', category);
+          openBtn.setAttribute('data-di-display', label);
+          openBtn.setAttribute('data-di-canon', (row.canonical_id || canonicalFromDisplay(label)));
+          openBtn.setAttribute('data-di-source', 'global_top100');
 
           styleOpenButton(openBtn);
 
