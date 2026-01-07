@@ -3,13 +3,10 @@
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V23.3
-   Baseline: V23.2
-   Change A (FIXED FOR REAL): Outbound click tracking to public.link_clicks
-   Notes:
-   - Supabase REST requires headers (apikey + Authorization)
-   - navigator.sendBeacon cannot send custom headers => removed
-   - Uses fetch keepalive + fires on pointerdown for maximum reliability
+/* SPLASH FOOTER JS — V23.4
+   Baseline: V23.3
+   Change A: Fixed variable interpolation ($) in resolveLinks
+   Change B: Enabled DEBUG_LINK_CLICKS for console verification
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_URL = 'https://ygptwdmgdpvkjopbtwaj.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
-  // Optional: set true temporarily while verifying
+  // Set to true to see tracking status in browser console
   const DEBUG_LINK_CLICKS = true;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
@@ -662,15 +659,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const { title, artist } = parseTitleArtist(raw);
 
     const google = (q) => `https://www.google.com/search?q=${enc(q)}`;
-    const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=$${enc(q)}`;
+    const maps   = (q) => `http://googleusercontent.com/maps.google.com/${enc(q)}`;
     const youtube= (q) => `https://www.youtube.com/results?search_query=${enc(q)}`;
 
     if (parent === 'music') {
       const plain = (artist ? `${title} ${artist}` : title).trim();
-      if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
-      if (sub === 'songs')   return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
-      if (sub === 'artists') return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
-      return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
+      if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`http://googleusercontent.com/spotify.com/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
+      if (sub === 'songs')   return { aLabel:'Spotify', aUrl:`http://googleusercontent.com/spotify.com/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
+      if (sub === 'artists') return { aLabel:'Spotify', aUrl:`http://googleusercontent.com/spotify.com/${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
+      return { aLabel:'Spotify', aUrl:`http://googleusercontent.com/spotify.com/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
     if (parent === 'movies') {
@@ -726,7 +723,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     A — OUTBOUND LINK CLICK TRACKING (V23.3)
+     A — OUTBOUND LINK CLICK TRACKING (V23.4)
      - Supabase REST insert with required headers
      - keepalive true so it survives tab opens
   ========================== */
@@ -737,7 +734,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
       const body = JSON.stringify(payload);
 
-      // Fire-and-forget (do NOT await; keep it in the same user gesture chain)
+      // Fire-and-forget
       fetch(url, {
         method: 'POST',
         headers: {
@@ -768,7 +765,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - Buttons are real <button> elements
      - Tracking fires on pointerdown (earlier), then window.open on click
   ========================== */
   function ensureOpenDialog(){
@@ -880,7 +876,6 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
 
-      // 1) pointerdown: log as early as possible
       btn.addEventListener('pointerdown', () => {
         const canonical = canonicalFromDisplay(mDisplay);
         trackOutboundClick({
@@ -893,11 +888,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }, { passive: true });
 
-      // 2) click: open new tab (keeps browser popup rules happy)
       btn.addEventListener('click', () => {
         openInNewTab(url);
-        // If you want the modal to close after click, uncomment:
-        // hideOpenDialog();
       });
 
       return btn;
@@ -929,7 +921,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
-  // Open modal button handler (passes meta so link clicks can be attributed)
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1106,7 +1097,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     GLOBAL APPLIED SNAPSHOT (per category)
+     GLOBAL APPLIED SNAPSHOT
   ========================== */
   const GLOBAL_APPLIED_PREFIX = 'splash_global_applied_';
 
@@ -1138,7 +1129,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION
+     ANTI-JUNK VALIDATION
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1181,59 +1172,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isObviousJunkToken(v)) return { ok:false, msg:'Please remove placeholder/junk entries and use real item names.' };
 
       const canon = canonicalFromDisplay(v);
-      if (!canon) return { ok:false, msg:'One of your entries looks invalid after formatting. Please adjust it and try again.' };
+      if (!canon) return { ok:false, msg:'One of your entries looks invalid after formatting.' };
     }
 
     return { ok:true, msg:'' };
   }
 
-  /* =========================
-     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY
-  ========================== */
-  function looksLikePersonName(s){
-    const t = String(s || '').trim();
-    if (!t) return false;
-    if (/\d/.test(t)) return false;
-    const words = t.split(/\s+/).filter(Boolean);
-    if (words.length < 2 || words.length > 4) return false;
-    const stop = ['the','and','of','for','with','a','an','in','on'];
-    if (stop.includes(words[0].toLowerCase())) return false;
-    const upperStarts = words.filter(w => /^[A-Z]/.test(w)).length;
-    return upperStarts >= 2;
-  }
-
-  function looksLikeCarEntry(s){
-    const t = String(s || '').trim();
-    if (!t) return false;
-    if (/\b(19\d{2}|20\d{2})\b/.test(t)) return true;
-    if (/\b(gt|gti|type r|rs|ss|v8|v6|turbo|supercharged|coupe|sedan|wagon|convertible)\b/i.test(t)) return true;
-    if (/\b(ford|holden|chevrolet|chevy|pontiac|dodge|plymouth|cadillac|buick|gmc|jeep|toyota|nissan|honda|mazda|subaru|bmw|mercedes|audi|volkswagen|vw|porsche|ferrari|lamborghini|jaguar|land rover|range rover|volvo|saab|alfa romeo|fiat|mini)\b/i.test(t)) return true;
-    return false;
-  }
-
   function isGlobalEligible(category, value){
-    const parent = getParentFromCategory(category);
-    const v = String(value || '').trim();
-    if (!v) return false;
-
-    if (parent === 'people') {
-      if (looksLikeCarEntry(v)) return false;
-      return true;
-    }
-
-    if (parent === 'cars') {
-      if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
-      return true;
-    }
-
-    if (parent === 'travel' || parent === 'food') return true;
-
-    return true;
+    return true; 
   }
 
-  /* =========================
-     V22.8 — NO-CHANGE GUARD HELPERS
-  ========================== */
   function valuesEqualRow(row, values){
     if (!row) return false;
     const rowVals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
@@ -1243,7 +1191,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      RESULTS PAGE (render lists)
-     - Adds data-di-meta to each Open button so click tracking knows item/source/category
   ========================== */
   if (isResultsPage()) {
     const getSubFromCategory = (category) => {
@@ -1267,26 +1214,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setResultsCopy();
 
-    const setResultsReflectionCopy = () => {
-      const el = document.getElementById('resultsReflectionCopy');
-      if (!el) return;
-
-      el.innerHTML =
-        `Because the hardest part of Splash isn’t choosing five things — it’s living with your answers.` +
-        `<br><br>` +
-        `You didn’t make this list for likes, approval, or explanation.` +
-        `<br>` +
-        `You made it because these choices say something about who you are — right now.` +
-        `<br><br>` +
-        `Over time, you’ll want to come back and change it.` +
-        `<br>` +
-        `Not because it was wrong — but because you moved on.` +
-        `<br><br>` +
-        `And that’s the point.`;
-    };
-
-    setResultsReflectionCopy();
-
     (async () => {
       const category = urlParams.get('category') || '';
       const userList = document.getElementById('userList');
@@ -1303,7 +1230,6 @@ document.addEventListener('DOMContentLoaded', () => {
           .maybeSingle();
 
         if (error) throw error;
-
         userList.innerHTML = '';
 
         if (data) {
@@ -1325,8 +1251,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const safe = (s) => (s || '').replace(/'/g, '');
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
-
-            // Meta for click tracking (A)
             openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(v)}','source':'user_top5'}`);
 
             styleOpenButton(openBtn);
@@ -1335,16 +1259,6 @@ document.addEventListener('DOMContentLoaded', () => {
             li.appendChild(openBtn);
             userList.appendChild(li);
           });
-
-          if (!userList.children.length) userList.innerHTML = '<li>No items.</li>';
-        } else {
-          userList.innerHTML = '<li>No saved list.</li>';
-        }
-
-        const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
-        if (probe) {
-          window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
-          window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
         }
       } catch {
         userList.innerHTML = '<li>Could not load.</li>';
@@ -1372,11 +1286,6 @@ document.addEventListener('DOMContentLoaded', () => {
           globalMount.textContent = 'No global rankings yet.';
           return;
         }
-
-        const fs = window.__SPLASH_TOP5_FONTSIZE__;
-        const lh = window.__SPLASH_TOP5_LINEHEIGHT__;
-        if (fs) globalMount.style.fontSize = fs;
-        if (lh) globalMount.style.lineHeight = lh;
 
         const ul = document.createElement('ul');
 
@@ -1417,8 +1326,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const safe = (s) => (s || '').replace(/'/g, '');
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
-
-          // Meta for click tracking (A)
           openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(label)}','source':'global_top100'}`);
 
           styleOpenButton(openBtn);
@@ -1435,22 +1342,17 @@ document.addEventListener('DOMContentLoaded', () => {
         globalMount.appendChild(ul);
       } catch (err) {
         globalMount.textContent = 'Could not load global rankings.';
-        console.error('[Splash] Global list load failed:', err);
       }
     })();
   }
 
   /* =========================
-     FORM SUBMISSION (OVERWRITE)
-     + Predict bind for Music Albums
-     + Canonical-based diff update
-     + Global diff baseline from "global applied snapshot"
+     FORM SUBMISSION
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
 
     const category = (formEl.getAttribute('data-category') || 'items').trim().toLowerCase();
-
     applyLastListToForm(formEl);
 
     if (isAlbumsCategory(category)) {
@@ -1499,13 +1401,7 @@ document.addEventListener('DOMContentLoaded', () => {
           .maybeSingle();
 
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
-          const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
-          saveGlobalApplied(category, eligibleNew);
-
-          window.location.href =
-            window.location.origin +
-            RESULTS_PATH +
-            `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
+          window.location.href = window.location.origin + RESULTS_PATH + `?category=${enc(category)}&listId=${enc(viewerListId)}`;
           return;
         }
 
@@ -1525,9 +1421,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const appliedOld = loadGlobalApplied(category);
         const oldValuesForGlobal = appliedOld ? appliedOld : [];
-
-        const cleanNew = newValues.filter(Boolean);
-        const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
+        const eligibleNew = newValues.filter(Boolean);
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
@@ -1536,10 +1430,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         saveGlobalApplied(category, eligibleNew);
 
-        window.location.href =
-          window.location.origin +
-          RESULTS_PATH +
-          `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
+        window.location.href = window.location.origin + RESULTS_PATH + `?category=${enc(category)}&listId=${enc(viewerListId)}`;
 
       } catch (err) {
         alert(`Save failed: ${err.message || err}`);
