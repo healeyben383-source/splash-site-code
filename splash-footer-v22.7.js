@@ -3,13 +3,13 @@
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V23.2
-   Baseline: V23.1
-   Change A (FIXED): Outbound click tracking to public.link_clicks
+/* SPLASH FOOTER JS — V23.3
+   Baseline: V23.2
+   Change A (FIXED FOR REAL): Outbound click tracking to public.link_clicks
    Notes:
-   - Tracks actual clicks on the Open modal choices (Spotify / Apple Music)
-   - Uses sendBeacon / keepalive so inserts survive new-tab opens
-   - Optional debug toggle at top
+   - Supabase REST requires headers (apikey + Authorization)
+   - navigator.sendBeacon cannot send custom headers => removed
+   - Uses fetch keepalive + fires on pointerdown for maximum reliability
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -726,9 +726,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     A — OUTBOUND LINK CLICK TRACKING (FIXED FOR REAL UI)
-     - Uses REST insert via sendBeacon / keepalive
-     - Called directly from the Spotify/Apple buttons
+     A — OUTBOUND LINK CLICK TRACKING (V23.3)
+     - Supabase REST insert with required headers
+     - keepalive true so it survives tab opens
   ========================== */
   function trackOutboundClick(payload){
     try {
@@ -737,15 +737,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
       const body = JSON.stringify(payload);
 
-      // Preferred: sendBeacon (non-blocking, survives navigation better)
-      if (navigator.sendBeacon) {
-        const blob = new Blob([body], { type: 'application/json' });
-        const ok = navigator.sendBeacon(url, blob);
-        if (DEBUG_LINK_CLICKS) console.log('[Splash] sendBeacon link_clicks:', ok, payload);
-        return;
-      }
-
-      // Fallback: fetch keepalive
+      // Fire-and-forget (do NOT await; keep it in the same user gesture chain)
       fetch(url, {
         method: 'POST',
         headers: {
@@ -756,10 +748,17 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         body,
         keepalive: true
-      }).then(() => {
-        if (DEBUG_LINK_CLICKS) console.log('[Splash] fetch keepalive link_clicks ok', payload);
+      }).then(async (res) => {
+        if (DEBUG_LINK_CLICKS) {
+          const ok = res && res.ok;
+          console.log('[Splash] link_clicks POST', ok ? 'OK' : `FAIL ${res.status}`, payload);
+          if (!ok) {
+            const t = await res.text().catch(() => '');
+            console.warn('[Splash] link_clicks response body:', t);
+          }
+        }
       }).catch((e) => {
-        if (DEBUG_LINK_CLICKS) console.warn('[Splash] fetch keepalive link_clicks failed', e);
+        if (DEBUG_LINK_CLICKS) console.warn('[Splash] link_clicks fetch failed', e, payload);
       });
 
     } catch (e) {
@@ -769,8 +768,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - Renders Spotify/Apple as BUTTONS (matches your current UI)
-     - Each button logs click → then opens URL in new tab
+     - Buttons are real <button> elements
+     - Tracking fires on pointerdown (earlier), then window.open on click
   ========================== */
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
@@ -881,9 +880,9 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
 
-      btn.addEventListener('click', () => {
+      // 1) pointerdown: log as early as possible
+      btn.addEventListener('pointerdown', () => {
         const canonical = canonicalFromDisplay(mDisplay);
-
         trackOutboundClick({
           category: mCategory,
           canonical_id: canonical,
@@ -892,9 +891,12 @@ document.addEventListener('DOMContentLoaded', () => {
           link_label: label || '',
           source: mSource
         });
+      }, { passive: true });
 
+      // 2) click: open new tab (keeps browser popup rules happy)
+      btn.addEventListener('click', () => {
         openInNewTab(url);
-        // optional: keep modal open; if you prefer it to close after click, uncomment next line:
+        // If you want the modal to close after click, uncomment:
         // hideOpenDialog();
       });
 
