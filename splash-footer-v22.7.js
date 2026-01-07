@@ -1125,6 +1125,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return { ok:true, msg:'' };
   }
+   
+/* =========================
+   CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (NEW)
+   - Does NOT block saving the user’s list
+   - Only determines whether an entry is allowed to affect global_items
+========================== */
+function looksLikePersonName(s){
+  const t = String(s || '').trim();
+  if (!t) return false;
+
+  // reject if digits present (cars often have digits; people usually don't)
+  if (/\d/.test(t)) return false;
+
+  // 2–4 words, mostly Title Case
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+
+  // avoid obvious non-name tokens
+  const stop = ['the','and','of','for','with','a','an','in','on'];
+  if (stop.includes(words[0].toLowerCase())) return false;
+
+  // At least two words start with uppercase letters
+  const upperStarts = words.filter(w => /^[A-Z]/.test(w)).length;
+  return upperStarts >= 2;
+}
+
+function looksLikeCarEntry(s){
+  const t = String(s || '').trim();
+  if (!t) return false;
+
+  // common car signals
+  if (/\b(19\d{2}|20\d{2})\b/.test(t)) return true;
+  if (/\b(gt|gti|type r|rs|ss|v8|v6|turbo|supercharged|coupe|sedan|wagon|convertible)\b/i.test(t)) return true;
+
+  // known makes (high-signal list)
+  if (/\b(ford|holden|chevrolet|chevy|pontiac|dodge|plymouth|cadillac|buick|gmc|jeep|toyota|nissan|honda|mazda|subaru|bmw|mercedes|audi|volkswagen|vw|porsche|ferrari|lamborghini|jaguar|land rover|range rover|volvo|saab|alfa romeo|fiat|mini)\b/i.test(t)) return true;
+
+  return false;
+}
+
+function isGlobalEligible(category, value){
+  const parent = getParentFromCategory(category);
+  const v = String(value || '').trim();
+  if (!v) return false;
+
+  // People: names are valid
+  if (parent === 'people') return true;
+
+  // Cars: exclude obvious person names
+  if (parent === 'cars') {
+    if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
+    return true;
+  }
+
+  // Travel / Food: conservative name exclusion
+  if (parent === 'travel' || parent === 'food') {
+    if (looksLikePersonName(v) && !/[,\(\)]/.test(v)) return false;
+    return true;
+  }
+
+  // Everything else: allow
+  return true;
+}
 
   /* =========================
      V22.8 — NO-CHANGE GUARD HELPERS (NEW)
@@ -1395,7 +1458,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           // Ensure local applied snapshot stays aligned (optional but harmless)
           // We do NOT write to global_items.
-          saveGlobalApplied(category, newValues);
+         const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
+saveGlobalApplied(category, eligibleNew);
+
 
           window.location.href =
             window.location.origin +
@@ -1421,15 +1486,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Global diff baseline from local "applied snapshot" (unchanged)
         const appliedOld = loadGlobalApplied(category);
-        const oldValuesForGlobal = appliedOld ? appliedOld : [];
+const oldValuesForGlobal = appliedOld ? appliedOld : [];
 
-        const cleanNew = newValues.filter(Boolean);
-        const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, cleanNew);
+const cleanNew = newValues.filter(Boolean);
+const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
 
-        for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
-        for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
+const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
-        saveGlobalApplied(category, newValues);
+for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
+for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
+
+saveGlobalApplied(category, eligibleNew);
+
 
         window.location.href =
           window.location.origin +
