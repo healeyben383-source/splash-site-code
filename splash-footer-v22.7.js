@@ -5,11 +5,11 @@
 
 /* SPLASH FOOTER JS — V23.1
    Baseline: V22.9
-   Change A: Lightweight Outbound Link Analytics
-            - Inserts click events into public.link_clicks
-            - Tracks: category, canonical_id, display_name, link_slot (A/B), link_label, source (user_top5/global_top100)
-            - Fail-open + non-blocking (never delays navigation)
-   NOTE: This file is intended to replace the existing splash-footer JS in GitHub, then update the Webflow loader pin.
+   Change A (FIXED): Outbound click tracking to public.link_clicks
+   Notes:
+   - Tracks actual clicks on the Open modal links (A/B)
+   - Non-blocking (fire-and-forget)
+   - Adds minimal debug logging on failure (remove later if desired)
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -79,11 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      LIST ID (V22.9 — Ownership-safe)
-     - viewerListId: ALWAYS local identity (localStorage)
-     - islandListId: ONLY the ?listId= we are viewing on /island
-     - listId: the "active" listId used by the current page:
-       - /island uses islandListId (if present), otherwise viewerListId
-       - all other pages use viewerListId
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
@@ -111,8 +106,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      ISLAND "CAPTURED ON" DATE (V22.7)
-     - Uses earliest lists.created_at for this listId (Supabase truth)
-     - Falls back to localStorage only if the query fails
   ========================== */
   (async function fixCapturedOnDate(){
     if (!isIslandPage()) return;
@@ -141,7 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
-    // 1) Supabase truth: earliest created_at from lists for this listId
     try {
       const { data, error } = await supabase
         .from('lists')
@@ -160,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch(e) {}
 
-    // 2) Fallback: local cached value (legacy behavior) but does NOT advance once set
     try {
       const KEY = `splash_island_captured_at_${listId}`;
       const iso = localStorage.getItem(KEY) || '';
@@ -367,7 +358,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      MUSICBRAINZ PREDICT (Albums only)
-     (Unchanged)
   ========================== */
   function debounce(fn, wait) {
     let t = null;
@@ -565,7 +555,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      BACK BUTTONS (SMART ROUTING)
-     Class required: .back-button
   ========================== */
   document.querySelectorAll('.back-button').forEach((btn) => {
     const currentPath = pathNow();
@@ -596,24 +585,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      RESULTS → ISLAND BUTTON
-     Class required: .island-button
   ========================== */
   document.querySelectorAll('.island-button').forEach((btn) => {
     btn.textContent = 'My Desert Island →';
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      // Always go to YOUR island (viewerListId)
       window.location.href = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
     });
   });
 
   /* =========================
-     SHARE BUTTON (ISLAND) — V22.9 OWNERSHIP LOCK
-     Class required: .share-button
+     SHARE BUTTON (ISLAND) — OWNERSHIP LOCK
   ========================== */
   document.querySelectorAll('.share-button').forEach((btn) => {
 
-    // If viewing someone else’s island, replace share with "Make your own Splash"
     if (isIslandPage() && !isIslandOwner) {
       btn.textContent = 'Make your own Splash';
       btn.addEventListener('click', (e) => {
@@ -623,13 +608,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Owner view (or non-island pages): normal share
     btn.textContent = 'Share my island';
 
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
 
-      // Always share YOUR island (viewerListId), never the viewed island id
       const shareUrl = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
       const original = 'Share my island';
 
@@ -648,8 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* =========================
-     LINK RESOLVER (NO SPOTIFY API)
-     (UPDATED TO LOCKED 2-LINK MAP)
+     LINK RESOLVER (LOCKED 2-LINK MAP)
   ========================== */
   function parseTitleArtist(raw) {
     const s = (raw || '').trim();
@@ -680,7 +662,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=${enc(q)}`;
     const youtube= (q) => `https://www.youtube.com/results?search_query=${enc(q)}`;
 
-    // --- MUSIC: Spotify + Apple Music (locked) ---
     if (parent === 'music') {
       const plain = (artist ? `${title} ${artist}` : title).trim();
       if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
@@ -689,98 +670,102 @@ document.addEventListener('DOMContentLoaded', () => {
       return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
-    // --- MOVIES: IMDb + TMDB (locked) ---
     if (parent === 'movies') {
-      return {
-        aLabel:'IMDb',
-        aUrl:`https://www.imdb.com/find/?q=${enc(title)}`,
-        bLabel:'TMDB',
-        bUrl:`https://www.themoviedb.org/search?query=${enc(title)}`
-      };
+      return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'TMDB', bUrl:`https://www.themoviedb.org/search?query=${enc(title)}` };
     }
 
-    // --- TV: IMDb + Google Search (locked) ---
     if (parent === 'tv') {
-      return {
-        aLabel:'IMDb',
-        aUrl:`https://www.imdb.com/find/?q=${enc(title)}`,
-        bLabel:'Google',
-        bUrl: google(`${title} tv series`)
-      };
+      return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
     }
 
-    // --- BOOKS: Goodreads + Google Books (locked) ---
     if (parent === 'books') {
-      return {
-        aLabel:'Goodreads',
-        aUrl:`https://www.goodreads.com/search?q=${enc(title)}`,
-        bLabel:'Google Books',
-        bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}`
-      };
+      return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Google Books', bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}` };
     }
 
-    // --- GAMES: Metacritic + Wikipedia (locked, cross-platform) ---
     if (parent === 'games') {
-      return {
-        aLabel:'Metacritic',
-        aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`,
-        bLabel:'Wikipedia',
-        bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}`
-      };
+      return { aLabel:'Metacritic', aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`, bLabel:'Wikipedia', bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}` };
     }
 
-    // --- TRAVEL: Tripadvisor + Maps (locked) ---
     if (parent === 'travel') {
-      return {
-        aLabel:'Tripadvisor',
-        aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`,
-        bLabel:'Maps',
-        bUrl: maps(title)
-      };
+      return { aLabel:'Tripadvisor', aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`, bLabel:'Maps', bUrl: maps(title) };
     }
 
-    // --- FOOD: Allrecipes + Google Search (locked) ---
     if (parent === 'food') {
-      return {
-        aLabel:'Allrecipes',
-        aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`,
-        bLabel:'Google',
-        bUrl: google(`${title} recipe`)
-      };
+      return { aLabel:'Allrecipes', aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} recipe`) };
     }
 
-    // --- CARS: Google Search + YouTube (locked) ---
     if (parent === 'cars') {
-      return {
-        aLabel:'Google',
-        aUrl: google(`${title} car`),
-        bLabel:'YouTube',
-        bUrl: youtube(`${title} car`)
-      };
+      return { aLabel:'Google', aUrl: google(`${title} car`), bLabel:'YouTube', bUrl: youtube(`${title} car`) };
     }
 
-    // Fallback: keep 2 generic links
     return { aLabel:'Google', aUrl: google(title), bLabel:'Search', bUrl: google(title) };
   }
 
   /* =========================
-     SHARED BUTTON STYLE
+     GLOBAL ITEMS HELPERS
   ========================== */
-  function styleOpenButton(btn) {
-    btn.classList.add('di-action-pill');
-    btn.style.flex = '0 0 auto';
+  function normText(s){
+    return String(s || '').trim().replace(/\s+/g,' ');
   }
 
-  function styleRowLi(li) {
-    li.style.display = 'flex';
-    li.style.alignItems = 'center';
-    li.style.justifyContent = 'space-between';
-    li.style.gap = '12px';
+  function canonicalFromDisplay(display){
+    const t = normText(display).toLowerCase();
+    const cleaned = t
+      .replace(/[’']/g,'')
+      .replace(/[^a-z0-9\s-]/g,'')
+      .replace(/\s+/g,' ')
+      .trim();
+
+    return cleaned
+      .replace(/\s/g,'-')
+      .replace(/-+/g,'-')
+      .replace(/^-+|-+$/g,'');
   }
 
   /* =========================
+     A — OUTBOUND LINK CLICK TRACKING (FIXED)
+     - We track clicks on the actual <a> links in the Open modal
+     - This runs even if a new tab is opened
+  ========================== */
+  function trackOutboundClick(payload){
+    // fire-and-forget, do not await (do not block navigation)
+    try {
+      supabase.from('link_clicks').insert(payload)
+        .then(({ error }) => {
+          if (error) console.warn('[Splash] link_clicks insert failed:', error);
+        });
+    } catch (e) {
+      console.warn('[Splash] link_clicks insert exception:', e);
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest && e.target.closest('a[data-di-track="1"]');
+    if (!a) return;
+
+    const category = a.getAttribute('data-di-category') || '';
+    const display  = a.getAttribute('data-di-item') || '';
+    const slot     = a.getAttribute('data-di-slot') || '';
+    const label    = a.getAttribute('data-di-label') || '';
+    const source   = a.getAttribute('data-di-source') || '';
+
+    const canonical = canonicalFromDisplay(display);
+
+    if (!category || !slot || !label || !source || !canonical) return;
+
+    trackOutboundClick({
+      category,
+      canonical_id: canonical,
+      display_name: display,
+      link_slot: slot,
+      link_label: label,
+      source
+    });
+  }, true);
+
+  /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - V22.7: lock/unlock also touches <html> overflow for desktop resilience
+     - Updated so it tags modal links with tracking metadata
   ========================== */
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
@@ -829,14 +814,6 @@ document.addEventListener('DOMContentLoaded', () => {
       panel.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
     }
 
-    const mo = new MutationObserver(() => {
-      const hiddenByAria = sheet.getAttribute('aria-hidden') === 'true';
-      const hiddenByStyle = sheet.style.display === 'none' || getComputedStyle(sheet).display === 'none';
-      if (hiddenByAria || hiddenByStyle) unlockScroll();
-    });
-    mo.observe(sheet, { attributes: true, attributeFilter: ['style','aria-hidden'] });
-    sheet.__SPLASH_OBSERVER__ = mo;
-
     return sheet;
   }
 
@@ -870,29 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
     delete b.dataset.__diPrevHtmlOverflow;
   }
 
-  /* =========================
-     A: OUTBOUND LINK ANALYTICS (NON-BLOCKING)
-  ========================== */
-  function trackOutboundClick({ category, canonical_id, display_name, link_slot, link_label, source }) {
-    try {
-      supabase
-        .from('link_clicks')
-        .insert([{
-          category,
-          canonical_id: canonical_id || null,
-          display_name: display_name || null,
-          link_slot,
-          link_label,
-          source
-        }])
-        .then(() => {})
-        .catch(() => {});
-    } catch (e) {
-      // fail open
-    }
-  }
-
-  function showOpenDialog(links, ctx){
+  function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
@@ -902,9 +857,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const bLabel = (links && links.bLabel) ? String(links.bLabel) : '';
     const bUrl   = (links && links.bUrl) ? String(links.bUrl) : '';
 
+    const m = meta || {};
+    const mCategory = String(m.category || '');
+    const mDisplay  = String(m.display || '');
+    const mSource   = String(m.source || '');
+
     body.innerHTML = '';
 
-    const mkRow = (slot, label, url) => {
+    const mkRow = (label, url, slot) => {
       const row = document.createElement('div');
       row.className = 'di-open-row';
 
@@ -919,27 +879,22 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.target = '_blank';
       btn.rel = 'noopener noreferrer';
 
-      // A: Track outbound link clicks (fail-open, non-blocking)
-      btn.addEventListener('click', () => {
-        try {
-          trackOutboundClick({
-            category: (ctx && ctx.category) || '',
-            canonical_id: (ctx && ctx.canonical_id) || '',
-            display_name: (ctx && ctx.display_name) || '',
-            link_slot: slot,
-            link_label: String(label || ''),
-            source: (ctx && ctx.source) || ''
-          });
-        } catch (e) {}
-      }, { passive: true });
+      // Tracking metadata (A)
+      btn.setAttribute('data-di-track', '1');
+      btn.setAttribute('data-di-slot', slot);
+      btn.setAttribute('data-di-label', label || '');
+      btn.setAttribute('data-di-url', url || '');
+      btn.setAttribute('data-di-item', mDisplay);
+      btn.setAttribute('data-di-source', mSource);
+      btn.setAttribute('data-di-category', mCategory);
 
       row.appendChild(left);
       row.appendChild(btn);
       return row;
     };
 
-    if (aUrl) body.appendChild(mkRow('A', aLabel || 'Link 1', aUrl));
-    if (bUrl) body.appendChild(mkRow('B', bLabel || 'Link 2', bUrl));
+    if (aUrl) body.appendChild(mkRow(aLabel || 'Link 1', aUrl, 'A'));
+    if (bUrl) body.appendChild(mkRow(bLabel || 'Link 2', bUrl, 'B'));
 
     const cancelRow = document.createElement('div');
     cancelRow.className = 'di-open-row';
@@ -971,24 +926,21 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
+  // Open modal button handler (passes meta so link clicks can be attributed)
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
 
     const raw = btn.getAttribute('data-di-links') || '';
     let links = null;
-
     try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
 
-    const ctx = {
-      category: btn.getAttribute('data-di-category') || '',
-      display_name: btn.getAttribute('data-di-display') || '',
-      canonical_id: btn.getAttribute('data-di-canon') || '',
-      source: btn.getAttribute('data-di-source') || ''
-    };
+    const metaRaw = btn.getAttribute('data-di-meta') || '';
+    let meta = {};
+    try { meta = JSON.parse(metaRaw.replace(/'/g,'"')); } catch { meta = {}; }
 
     e.preventDefault();
-    showOpenDialog(links || {}, ctx);
+    showOpenDialog(links || {}, meta);
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -1019,26 +971,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* =========================
-     GLOBAL ITEMS HELPERS
+     SHARED BUTTON STYLE
   ========================== */
-  function normText(s){
-    return String(s || '').trim().replace(/\s+/g,' ');
+  function styleOpenButton(btn) {
+    btn.classList.add('di-action-pill');
+    btn.style.flex = '0 0 auto';
   }
 
-  function canonicalFromDisplay(display){
-    const t = normText(display).toLowerCase();
-    const cleaned = t
-      .replace(/[’']/g,'')
-      .replace(/[^a-z0-9\s-]/g,'')
-      .replace(/\s+/g,' ')
-      .trim();
-
-    return cleaned
-      .replace(/\s/g,'-')
-      .replace(/-+/g,'-')
-      .replace(/^-+|-+$/g,'');
+  function styleRowLi(li) {
+    li.style.display = 'flex';
+    li.style.alignItems = 'center';
+    li.style.justifyContent = 'space-between';
+    li.style.gap = '12px';
   }
 
+  /* =========================
+     GLOBAL ITEMS HELPERS (diff + up/down)
+  ========================== */
   function canonicalMultiset(arr){
     const m = new Map();
     const displayByCanon = new Map();
@@ -1186,7 +1135,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION (NEW)
+     V22.8 — ANTI-JUNK VALIDATION
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1204,13 +1153,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const banned = new Set(['test','testing','asdf','qwerty','aaa','bbb','ccc','123','1234','12345','lol','haha']);
     if (banned.has(t)) return true;
 
-    // 5+ same char (e.g., "aaaaa", ".....", "!!!!!")
     if (/^(.)\1{4,}$/.test(t)) return true;
 
-    // mostly non-letters/numbers
     const alnumCount = (t.match(/[a-z0-9]/g) || []).length;
     if (alnumCount < Math.min(2, t.length)) {
-      // allow small legit items like "It" (2 letters). This catches things like "----" or "!!"
       if (t.length >= 3) return true;
     }
 
@@ -1239,26 +1185,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (NEW)
-     - Does NOT block saving the user’s list
-     - Only determines whether an entry is allowed to affect global_items
+     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
     if (!t) return false;
-
-    // reject if digits present (cars often have digits; people usually don't)
     if (/\d/.test(t)) return false;
-
-    // 2–4 words, mostly Title Case
     const words = t.split(/\s+/).filter(Boolean);
     if (words.length < 2 || words.length > 4) return false;
-
-    // avoid obvious non-name tokens
     const stop = ['the','and','of','for','with','a','an','in','on'];
     if (stop.includes(words[0].toLowerCase())) return false;
-
-    // At least two words start with uppercase letters
     const upperStarts = words.filter(w => /^[A-Z]/.test(w)).length;
     return upperStarts >= 2;
   }
@@ -1266,14 +1202,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function looksLikeCarEntry(s){
     const t = String(s || '').trim();
     if (!t) return false;
-
-    // common car signals
     if (/\b(19\d{2}|20\d{2})\b/.test(t)) return true;
     if (/\b(gt|gti|type r|rs|ss|v8|v6|turbo|supercharged|coupe|sedan|wagon|convertible)\b/i.test(t)) return true;
-
-    // known makes (high-signal list)
     if (/\b(ford|holden|chevrolet|chevy|pontiac|dodge|plymouth|cadillac|buick|gmc|jeep|toyota|nissan|honda|mazda|subaru|bmw|mercedes|audi|volkswagen|vw|porsche|ferrari|lamborghini|jaguar|land rover|range rover|volvo|saab|alfa romeo|fiat|mini)\b/i.test(t)) return true;
-
     return false;
   }
 
@@ -1282,27 +1213,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const v = String(value || '').trim();
     if (!v) return false;
 
-    // People: allow people entries, but block obvious cars
     if (parent === 'people') {
       if (looksLikeCarEntry(v)) return false;
       return true;
     }
 
-    // Cars: exclude obvious person names
     if (parent === 'cars') {
       if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
       return true;
     }
 
-    // Travel / Food: allow
     if (parent === 'travel' || parent === 'food') return true;
 
-    // Everything else: allow
     return true;
   }
 
   /* =========================
-     V22.8 — NO-CHANGE GUARD HELPERS (NEW)
+     V22.8 — NO-CHANGE GUARD HELPERS
   ========================== */
   function valuesEqualRow(row, values){
     if (!row) return false;
@@ -1312,7 +1239,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     RESULTS PAGE
+     RESULTS PAGE (render lists)
+     - Adds data-di-meta to each Open button so click tracking knows item/source/category
   ========================== */
   if (isResultsPage()) {
     const getSubFromCategory = (category) => {
@@ -1336,7 +1264,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setResultsCopy();
 
-    // RESULTS Reflection block (locked copy)
     const setResultsReflectionCopy = () => {
       const el = document.getElementById('resultsReflectionCopy');
       if (!el) return;
@@ -1396,11 +1323,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // A: pass context into modal for click analytics
-            openBtn.setAttribute('data-di-category', category);
-            openBtn.setAttribute('data-di-display', v);
-            openBtn.setAttribute('data-di-canon', canonicalFromDisplay(v));
-            openBtn.setAttribute('data-di-source', 'user_top5');
+            // Meta for click tracking (A)
+            openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(v)}','source':'user_top5'}`);
 
             styleOpenButton(openBtn);
 
@@ -1491,11 +1415,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // A: pass context into modal for click analytics
-          openBtn.setAttribute('data-di-category', category);
-          openBtn.setAttribute('data-di-display', label);
-          openBtn.setAttribute('data-di-canon', (row.canonical_id || canonicalFromDisplay(label)));
-          openBtn.setAttribute('data-di-source', 'global_top100');
+          // Meta for click tracking (A)
+          openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(label)}','source':'global_top100'}`);
 
           styleOpenButton(openBtn);
 
@@ -1554,10 +1475,8 @@ document.addEventListener('DOMContentLoaded', () => {
         (formEl.querySelector(`input[name="rank${i}"]`)?.value || '').trim()
       );
 
-      // Keep your local snapshot behavior (unchanged)
       saveLastList(category, newValues);
 
-      // V22.8: anti-junk gate (NEW)
       const verdict = validateTop5(newValues);
       if (!verdict.ok) {
         alert(verdict.msg);
@@ -1569,11 +1488,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        // V22.8: no-change guard (NEW)
         const { data: existingRow, error: readErr } = await supabase
           .from('lists')
           .select('v1,v2,v3,v4,v5')
-          .eq('user_id', viewerListId)  // IMPORTANT: writes are always for viewer identity
+          .eq('user_id', viewerListId)
           .eq('category', category)
           .maybeSingle();
 
@@ -1588,11 +1506,10 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert list
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
-            user_id: viewerListId,      // IMPORTANT: writes are always for viewer identity
+            user_id: viewerListId,
             category: category,
             v1: newValues[0] || null,
             v2: newValues[1] || null,
