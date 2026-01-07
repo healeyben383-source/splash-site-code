@@ -1170,8 +1170,12 @@ function isGlobalEligible(category, value){
   const v = String(value || '').trim();
   if (!v) return false;
 
-  // People: names are valid
-  if (parent === 'people') return true;
+ // People: allow people entries, but block obvious cars
+if (parent === 'people') {
+  if (looksLikeCarEntry(v)) return false;   // prevents “1967 Ford Mustang” polluting People global
+  return true;
+}
+
 
   // Cars: exclude obvious person names
   if (parent === 'cars') {
@@ -1180,10 +1184,8 @@ function isGlobalEligible(category, value){
   }
 
   // Travel / Food: conservative name exclusion
-  if (parent === 'travel' || parent === 'food') {
-    if (looksLikePersonName(v) && !/[,\(\)]/.test(v)) return false;
-    return true;
-  }
+  if (parent === 'travel' || parent === 'food') return true;
+
 
   // Everything else: allow
   return true;
