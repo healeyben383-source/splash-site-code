@@ -3,13 +3,13 @@
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V23.1
-   Baseline: V22.9
+/* SPLASH FOOTER JS — V23.2
+   Baseline: V23.1
    Change A (FIXED): Outbound click tracking to public.link_clicks
    Notes:
-   - Tracks actual clicks on the Open modal links (A/B)
-   - Non-blocking (fire-and-forget)
-   - Adds minimal debug logging on failure (remove later if desired)
+   - Tracks actual clicks on the Open modal choices (Spotify / Apple Music)
+   - Uses sendBeacon / keepalive so inserts survive new-tab opens
+   - Optional debug toggle at top
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const SUPABASE_URL = 'https://ygptwdmgdpvkjopbtwaj.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
+
+  // Optional: set true temporarily while verifying
+  const DEBUG_LINK_CLICKS = false;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
@@ -723,49 +726,51 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     A — OUTBOUND LINK CLICK TRACKING (FIXED)
-     - We track clicks on the actual <a> links in the Open modal
-     - This runs even if a new tab is opened
+     A — OUTBOUND LINK CLICK TRACKING (FIXED FOR REAL UI)
+     - Uses REST insert via sendBeacon / keepalive
+     - Called directly from the Spotify/Apple buttons
   ========================== */
   function trackOutboundClick(payload){
-    // fire-and-forget, do not await (do not block navigation)
     try {
-      supabase.from('link_clicks').insert(payload)
-        .then(({ error }) => {
-          if (error) console.warn('[Splash] link_clicks insert failed:', error);
-        });
+      if (!payload || !payload.category || !payload.canonical_id || !payload.link_slot || !payload.link_label || !payload.source) return;
+
+      const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
+      const body = JSON.stringify(payload);
+
+      // Preferred: sendBeacon (non-blocking, survives navigation better)
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: 'application/json' });
+        const ok = navigator.sendBeacon(url, blob);
+        if (DEBUG_LINK_CLICKS) console.log('[Splash] sendBeacon link_clicks:', ok, payload);
+        return;
+      }
+
+      // Fallback: fetch keepalive
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal'
+        },
+        body,
+        keepalive: true
+      }).then(() => {
+        if (DEBUG_LINK_CLICKS) console.log('[Splash] fetch keepalive link_clicks ok', payload);
+      }).catch((e) => {
+        if (DEBUG_LINK_CLICKS) console.warn('[Splash] fetch keepalive link_clicks failed', e);
+      });
+
     } catch (e) {
-      console.warn('[Splash] link_clicks insert exception:', e);
+      if (DEBUG_LINK_CLICKS) console.warn('[Splash] trackOutboundClick exception', e);
     }
   }
 
-  document.addEventListener('click', (e) => {
-    const a = e.target && e.target.closest && e.target.closest('a[data-di-track="1"]');
-    if (!a) return;
-
-    const category = a.getAttribute('data-di-category') || '';
-    const display  = a.getAttribute('data-di-item') || '';
-    const slot     = a.getAttribute('data-di-slot') || '';
-    const label    = a.getAttribute('data-di-label') || '';
-    const source   = a.getAttribute('data-di-source') || '';
-
-    const canonical = canonicalFromDisplay(display);
-
-    if (!category || !slot || !label || !source || !canonical) return;
-
-    trackOutboundClick({
-      category,
-      canonical_id: canonical,
-      display_name: display,
-      link_slot: slot,
-      link_label: label,
-      source
-    });
-  }, true);
-
   /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - Updated so it tags modal links with tracking metadata
+     - Renders Spotify/Apple as BUTTONS (matches your current UI)
+     - Each button logs click → then opens URL in new tab
   ========================== */
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
@@ -847,6 +852,12 @@ document.addEventListener('DOMContentLoaded', () => {
     delete b.dataset.__diPrevHtmlOverflow;
   }
 
+  function openInNewTab(url){
+    const u = String(url || '').trim();
+    if (!u || u === '#') return;
+    window.open(u, '_blank', 'noopener,noreferrer');
+  }
+
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
@@ -864,52 +875,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
     body.innerHTML = '';
 
-    const mkRow = (label, url, slot) => {
-      const row = document.createElement('div');
-      row.className = 'di-open-row';
-
-      const left = document.createElement('div');
-      left.className = 'lbl';
-      left.textContent = label || 'Open';
-
-      const btn = document.createElement('a');
+    const mkChoiceBtn = (label, url, slot) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
       btn.className = 'di-action-pill';
-      btn.textContent = 'Open';
-      btn.href = url || '#';
-      btn.target = '_blank';
-      btn.rel = 'noopener noreferrer';
+      btn.textContent = label || 'Open';
 
-      // Tracking metadata (A)
-      btn.setAttribute('data-di-track', '1');
-      btn.setAttribute('data-di-slot', slot);
-      btn.setAttribute('data-di-label', label || '');
-      btn.setAttribute('data-di-url', url || '');
-      btn.setAttribute('data-di-item', mDisplay);
-      btn.setAttribute('data-di-source', mSource);
-      btn.setAttribute('data-di-category', mCategory);
+      btn.addEventListener('click', () => {
+        const canonical = canonicalFromDisplay(mDisplay);
 
-      row.appendChild(left);
-      row.appendChild(btn);
-      return row;
+        trackOutboundClick({
+          category: mCategory,
+          canonical_id: canonical,
+          display_name: mDisplay,
+          link_slot: slot,
+          link_label: label || '',
+          source: mSource
+        });
+
+        openInNewTab(url);
+        // optional: keep modal open; if you prefer it to close after click, uncomment next line:
+        // hideOpenDialog();
+      });
+
+      return btn;
     };
 
-    if (aUrl) body.appendChild(mkRow(aLabel || 'Link 1', aUrl, 'A'));
-    if (bUrl) body.appendChild(mkRow(bLabel || 'Link 2', bUrl, 'B'));
+    if (aUrl) body.appendChild(mkChoiceBtn(aLabel || 'Link 1', aUrl, 'A'));
+    if (bUrl) body.appendChild(mkChoiceBtn(bLabel || 'Link 2', bUrl, 'B'));
 
-    const cancelRow = document.createElement('div');
-    cancelRow.className = 'di-open-row';
-    const cancelLbl = document.createElement('div');
-    cancelLbl.className = 'lbl';
-    cancelLbl.textContent = 'Cancel';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'di-action-pill';
-    cancelBtn.textContent = 'Close';
+    cancelBtn.textContent = 'Cancel';
     cancelBtn.setAttribute('data-di-close','');
-    cancelBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); hideOpenDialog(); }, { passive:false });
-    cancelRow.appendChild(cancelLbl);
-    cancelRow.appendChild(cancelBtn);
-    body.appendChild(cancelRow);
+    cancelBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); hideOpenDialog(); });
+    body.appendChild(cancelBtn);
 
     if (!aUrl && !bUrl) body.textContent = 'No links available.';
 
