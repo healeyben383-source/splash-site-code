@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
   // Optional: set true temporarily while verifying
-  const DEBUG_LINK_CLICKS = false;
+  const DEBUG_LINK_CLICKS = true;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
@@ -662,15 +662,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const { title, artist } = parseTitleArtist(raw);
 
     const google = (q) => `https://www.google.com/search?q=${enc(q)}`;
-    const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=${enc(q)}`;
+    const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=$${enc(q)}`;
     const youtube= (q) => `https://www.youtube.com/results?search_query=${enc(q)}`;
 
     if (parent === 'music') {
       const plain = (artist ? `${title} ${artist}` : title).trim();
-      if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
-      if (sub === 'songs')   return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
-      if (sub === 'artists') return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
-      return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
+      if (sub === 'albums')  return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=album` };
+      if (sub === 'songs')   return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}&entity=song` };
+      if (sub === 'artists') return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(title)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(title)}&entity=musicArtist` };
+      return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/$${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
     if (parent === 'movies') {
