@@ -3,10 +3,10 @@
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V22.8
-   Baseline: V22.7 (Pinned: 57fe6c2)
-   Changes: (1) No-change submit guard (prevents timestamp + global churn)
-            (2) Anti-junk validation gate (prevents global pollution)
+/* SPLASH FOOTER JS — V22.9
+   Baseline: V22.8
+   Changes: (3) Share Button Ownership Lock (prevents resharing someone else’s island)
+            (4) Separate viewerListId (local identity) from islandListId (URL identity on /island)
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -75,7 +75,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     LIST ID
+     LIST ID (V22.9 — Ownership-safe)
+     - viewerListId: ALWAYS local identity (localStorage)
+     - islandListId: ONLY the ?listId= we are viewing on /island
+     - listId: the "active" listId used by the current page:
+       - /island uses islandListId (if present), otherwise viewerListId
+       - all other pages use viewerListId
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
@@ -90,14 +95,16 @@ document.addEventListener('DOMContentLoaded', () => {
     return id;
   }
 
-  function getListIdFromUrlOrLocal() {
-    const urlId = new URL(window.location.href).searchParams.get('listId');
-    return urlId || getOrCreateListId();
-  }
-
+  const viewerListId = getOrCreateListId();
   const urlParams = new URLSearchParams(window.location.search);
   const categoryFromQuery = urlParams.get('category') || '';
-  const listId = getListIdFromUrlOrLocal();
+
+  const islandListId = isIslandPage() ? (urlParams.get('listId') || '') : '';
+  const listId = (isIslandPage() && islandListId) ? islandListId : viewerListId;
+
+  const isIslandOwner = !isIslandPage()
+    ? true
+    : ((islandListId || viewerListId) === viewerListId);
 
   /* =========================
      ISLAND "CAPTURED ON" DATE (V22.7)
@@ -592,21 +599,35 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'My Desert Island →';
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      window.location.href = window.location.origin + ISLAND_PATH + `?listId=${enc(listId)}`;
+      // Always go to YOUR island (viewerListId)
+      window.location.href = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
     });
   });
 
   /* =========================
-     SHARE BUTTON (ISLAND)
+     SHARE BUTTON (ISLAND) — V22.9 OWNERSHIP LOCK
      Class required: .share-button
   ========================== */
   document.querySelectorAll('.share-button').forEach((btn) => {
+
+    // If viewing someone else’s island, replace share with "Make your own Splash"
+    if (isIslandPage() && !isIslandOwner) {
+      btn.textContent = 'Make your own Splash';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.location.href = window.location.origin + '/';
+      });
+      return;
+    }
+
+    // Owner view (or non-island pages): normal share
     btn.textContent = 'Share my island';
 
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
 
-      const shareUrl = window.location.origin + ISLAND_PATH + `?listId=${enc(listId)}`;
+      // Always share YOUR island (viewerListId), never the viewed island id
+      const shareUrl = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
       const original = 'Share my island';
 
       try {
@@ -1141,25 +1162,25 @@ document.addEventListener('DOMContentLoaded', () => {
     setResultsCopy();
 
     // RESULTS Reflection block (locked copy)
-const setResultsReflectionCopy = () => {
-  const el = document.getElementById('resultsReflectionCopy');
-  if (!el) return;
+    const setResultsReflectionCopy = () => {
+      const el = document.getElementById('resultsReflectionCopy');
+      if (!el) return;
 
-  el.innerHTML =
-    `Because the hardest part of Splash isn’t choosing five things — it’s living with your answers.` +
-    `<br><br>` +
-    `You didn’t make this list for likes, approval, or explanation.` +
-    `<br>` +
-    `You made it because these choices say something about who you are — right now.` +
-    `<br><br>` +
-    `Over time, you’ll want to come back and change it.` +
-    `<br>` +
-    `Not because it was wrong — but because you moved on.` +
-    `<br><br>` +
-    `And that’s the point.`;
-};
+      el.innerHTML =
+        `Because the hardest part of Splash isn’t choosing five things — it’s living with your answers.` +
+        `<br><br>` +
+        `You didn’t make this list for likes, approval, or explanation.` +
+        `<br>` +
+        `You made it because these choices say something about who you are — right now.` +
+        `<br><br>` +
+        `Over time, you’ll want to come back and change it.` +
+        `<br>` +
+        `Not because it was wrong — but because you moved on.` +
+        `<br><br>` +
+        `And that’s the point.`;
+    };
 
-setResultsReflectionCopy();
+    setResultsReflectionCopy();
 
     (async () => {
       const category = urlParams.get('category') || '';
@@ -1366,7 +1387,7 @@ setResultsReflectionCopy();
         const { data: existingRow, error: readErr } = await supabase
           .from('lists')
           .select('v1,v2,v3,v4,v5')
-          .eq('user_id', listId)
+          .eq('user_id', viewerListId)  // IMPORTANT: writes are always for viewer identity
           .eq('category', category)
           .maybeSingle();
 
@@ -1379,7 +1400,7 @@ setResultsReflectionCopy();
           window.location.href =
             window.location.origin +
             RESULTS_PATH +
-            `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(listId)}`;
+            `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
           return;
         }
 
@@ -1387,7 +1408,7 @@ setResultsReflectionCopy();
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
-            user_id: listId,
+            user_id: viewerListId,      // IMPORTANT: writes are always for viewer identity
             category: category,
             v1: newValues[0] || null,
             v2: newValues[1] || null,
@@ -1413,7 +1434,7 @@ setResultsReflectionCopy();
         window.location.href =
           window.location.origin +
           RESULTS_PATH +
-          `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(listId)}`;
+          `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
         alert(`Save failed: ${err.message || err}`);
