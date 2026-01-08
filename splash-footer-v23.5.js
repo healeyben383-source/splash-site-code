@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
   // Optional: set true temporarily while verifying
-  const DEBUG_LINK_CLICKS = false;
+  const DEBUG_LINK_CLICKS = !!window.__SPLASH_DEBUG_LINK_CLICKS__;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
@@ -915,6 +915,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Persist meta on the modal so provider link clicks can reference it later
     setModalMeta(sheet, meta || {});
+    // Global fallback (in case modal state can't be read during the click)
+window.__SPLASH_LAST_OPEN_META__ = meta || {};
+ 
 
     const aLabel = (links && links.aLabel) ? String(links.aLabel) : '';
     const aUrl   = (links && links.aUrl) ? String(links.aUrl) : '';
@@ -933,6 +936,9 @@ document.addEventListener('DOMContentLoaded', () => {
       a.rel = 'noopener noreferrer';
       a.setAttribute('data-di-slot', String(slot || ''));
       a.setAttribute('data-di-label', String(label || ''));
+       // Attach meta directly to the link element (more reliable than reading from the sheet)
+a.__diMeta = meta || {};
+
       return a;
     };
 
@@ -1001,7 +1007,12 @@ document.addEventListener('DOMContentLoaded', () => {
       null;
 
     if (providerEl) {
-      const meta = getModalMeta(sheet) || {};
+      const meta =
+  providerEl.__diMeta ||
+  getModalMeta(sheet) ||
+  window.__SPLASH_LAST_OPEN_META__ ||
+  {};
+
       const mCategory = String(meta.category || categoryFromQuery || '');
       const mDisplay  = String(meta.display || '');
       const mSource   = String(meta.source || 'user_top5');
@@ -1057,6 +1068,67 @@ document.addEventListener('DOMContentLoaded', () => {
     e.stopPropagation();
     hideOpenDialog();
   }, true);
+document.addEventListener('click', (e) => {
+  // Fallback: some environments don't reliably fire pointerdown for <a target="_blank">
+  const t = e.target;
+  if (!t) return;
+
+  const providerEl =
+    t.closest('.di-open-link') ||
+    t.closest('.di-open-sheet a[href]') ||
+    null;
+
+  if (!providerEl) return;
+
+  const sheet = document.querySelector('.di-open-sheet');
+  const meta =
+    providerEl.__diMeta ||
+    (sheet ? getModalMeta(sheet) : null) ||
+    window.__SPLASH_LAST_OPEN_META__ ||
+    {};
+
+  const mCategory = String(meta.category || categoryFromQuery || '');
+  const mDisplay  = String(meta.display || '');
+  const mSource   = String(meta.source || 'user_top5');
+
+  const label =
+    providerEl.getAttribute('data-di-label') ||
+    providerEl.getAttribute('aria-label') ||
+    (providerEl.textContent || '').trim() ||
+    'Open';
+
+  let slot =
+    providerEl.getAttribute('data-di-slot') ||
+    providerEl.dataset.slot ||
+    providerEl.dataset.diSlot ||
+    '';
+
+  if (!slot && sheet) {
+    const body = sheet.querySelector('#diOpenBody');
+    const links = body ? Array.from(body.querySelectorAll('.di-open-link, a[href]')).filter(a => a && a.href) : [];
+    const idx = links.indexOf(providerEl);
+    slot = (idx === 0) ? 'A' : (idx === 1 ? 'B' : 'A');
+  }
+
+  // If display is missing, do not silently fail—log it (debug) and bail.
+  if (!mDisplay) {
+    if (DEBUG_LINK_CLICKS) console.warn('[Splash] Missing meta.display on provider click', { meta, label, slot });
+    return;
+  }
+
+  const canonical = canonicalFromDisplay(mDisplay);
+
+  if (DEBUG_LINK_CLICKS) console.log('[Splash] provider click (click fallback)', { mCategory, mDisplay, canonical, slot, label, mSource });
+
+  trackOutboundClick({
+    category: mCategory,
+    canonical_id: canonical,
+    display_name: mDisplay,
+    link_slot: slot || 'A',
+    link_label: label,
+    source: mSource
+  });
+}, true);
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideOpenDialog();
