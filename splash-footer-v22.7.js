@@ -1,3 +1,4 @@
+/* SPLASH FOOTER JS — V22.7s (Outbound click meta parsing hotfix) */
 // BASELINE — Global submit guard + junk filter verified (Jan 2026)
 // - No-change submits do not update timestamps
 // - Junk input is blocked from polluting global_items
@@ -24,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
   // Optional: set true temporarily while verifying
-  const DEBUG_LINK_CLICKS = true;
+  const DEBUG_LINK_CLICKS = false;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
@@ -730,6 +731,31 @@ document.addEventListener('DOMContentLoaded', () => {
      - Supabase REST insert with required headers
      - keepalive true so it survives tab opens
   ========================== */
+
+  // Parses either strict JSON or a JS-style object literal stored in data attributes.
+  // Supports values like: "{ category:'music-albums', display:'Bad - Michael Jackson', source:'user_top5' }"
+  function parseLooseJsonObject(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    // 1) Strict JSON first
+    try { return JSON.parse(s); } catch (e) {}
+
+    // 2) JS object-literal -> JSON
+    try {
+      let j = s;
+      // Quote unquoted keys after { or ,
+      j = j.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":');
+      // Replace single quotes with double quotes
+      j = j.replace(/'/g, '"');
+      return JSON.parse(j);
+    } catch (e) {
+      return null;
+    }
+  }
+
+
   function trackOutboundClick(payload){
     try {
       if (!payload || !payload.category || !payload.canonical_id || !payload.link_slot || !payload.link_label || !payload.source) return;
@@ -934,16 +960,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
 
-    const raw = btn.getAttribute('data-di-links') || '';
-    let links = null;
-    try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
+    const rawLinks = btn.getAttribute('data-di-links') || '';
+    const rawMeta  = btn.getAttribute('data-di-meta')  || '';
 
-    const metaRaw = btn.getAttribute('data-di-meta') || '';
-    let meta = {};
-    try { meta = JSON.parse(metaRaw.replace(/'/g,'"')); } catch { meta = {}; }
+    const links = parseLooseJsonObject(rawLinks) || {};
+    const meta  = parseLooseJsonObject(rawMeta)  || {};
+
+    // Fallbacks so tracking always has required context
+    if (!meta.category) meta.category = categoryFromQuery || '';
+    if (!meta.source) meta.source = 'user_top5';
 
     e.preventDefault();
-    showOpenDialog(links || {}, meta);
+    showOpenDialog(links, meta);
   });
 
   document.addEventListener('pointerdown', (e) => {
