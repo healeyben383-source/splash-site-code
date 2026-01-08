@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
   // Optional: set true temporarily while verifying
-  const DEBUG_LINK_CLICKS = false;
+  const DEBUG_LINK_CLICKS = true;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
