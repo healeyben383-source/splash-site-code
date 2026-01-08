@@ -1,12 +1,13 @@
-/* SPLASH FOOTER JS — V23.5
-   Baseline: v22.7s/v23.3 (user-provided)
-   Fix: Outbound link analytics is now MODAL-STATE-BASED:
-        - Capture data-di-meta at modal open (from the launching [data-di-open] button)
-        - Persist meta on the open sheet (shared state)
-        - Track provider clicks from inside the modal (supports <a.di-open-link> AND buttons)
+/* SPLASH FOOTER JS — V23.6 (patched on top of V23.5)
+   Baseline: V23.5
+   Fix: Provider outbound link analytics reliability:
+        - Persist meta at modal open (global + sheet)
+        - Attach meta to provider links
+        - Intercept provider <a> click to POST before navigation
+        - Normalize source to satisfy DB check constraint
    Notes:
    - Supabase REST requires headers (apikey + Authorization)
-   - Uses fetch keepalive + fires on pointerdown for maximum reliability
+   - Uses fetch keepalive; click handler delays window.open slightly
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -723,28 +724,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     A — OUTBOUND LINK CLICK TRACKING (V23.5)
-     - Supabase REST insert with required headers
-     - keepalive true so it survives tab opens
-     - exposed to window.trackOutboundClick
+     A — OUTBOUND LINK CLICK TRACKING
   ========================== */
 
-  // Parses either strict JSON or a JS-style object literal stored in data attributes.
-  // Supports values like: "{ category:'music-albums', display:'Bad - Michael Jackson', source:'user_top5' }"
   function parseLooseJsonObject(raw) {
     if (!raw) return null;
     const s = String(raw).trim();
     if (!s) return null;
 
-    // 1) Strict JSON first
     try { return JSON.parse(s); } catch (e) {}
 
-    // 2) JS object-literal -> JSON
     try {
       let j = s;
-      // Quote unquoted keys after { or ,
       j = j.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":');
-      // Replace single quotes with double quotes
       j = j.replace(/'/g, '"');
       return JSON.parse(j);
     } catch (e) {
@@ -752,9 +744,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function normalizeClickSource(src){
+    const s = String(src || '').trim();
+    const allowed = new Set(['user_top5', 'global_top100']);
+    return allowed.has(s) ? s : 'user_top5';
+  }
+
   function trackOutboundClick(payload){
     try {
-      if (!payload || !payload.category || !payload.canonical_id || !payload.link_slot || !payload.link_label || !payload.source) return;
+      if (!payload) return;
+
+      payload.source = normalizeClickSource(payload.source);
+
+      if (!payload.category || !payload.canonical_id || !payload.link_slot || !payload.link_label || !payload.source) return;
 
       const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
       const body = JSON.stringify(payload);
@@ -787,12 +789,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Expose for debugging / typeof checks
   window.trackOutboundClick = trackOutboundClick;
 
   /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - Persist meta on the modal sheet so provider link clicks can log reliably
   ========================== */
 
   const MODAL_META_KEY = '__diMetaJson';
@@ -881,13 +881,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function setModalMeta(sheet, metaObj){
     if (!sheet) return;
     const m = metaObj || {};
-    // normalize required fallbacks
     if (!m.category) m.category = categoryFromQuery || '';
     if (!m.source) m.source = 'user_top5';
+    m.source = normalizeClickSource(m.source);
+
     const json = JSON.stringify(m);
     sheet[MODAL_META_KEY] = json;
     sheet[MODAL_META_PARSED_KEY] = m;
-    sheet.dataset.diMeta = json; // also keep in dataset for visibility
+    sheet.dataset.diMeta = json;
   }
 
   function getModalMeta(sheet){
@@ -902,22 +903,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return null;
   }
 
-  function openInNewTab(url){
-    const u = String(url || '').trim();
-    if (!u || u === '#') return;
-    window.open(u, '_blank', 'noopener,noreferrer');
-  }
-
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
 
-    // Persist meta on the modal so provider link clicks can reference it later
+    // Persist meta on the modal AND globally
     setModalMeta(sheet, meta || {});
-    // Global fallback (in case modal state can't be read during the click)
-window.__SPLASH_LAST_OPEN_META__ = meta || {};
- 
+    window.__SPLASH_LAST_OPEN_META__ = meta || {};
 
     const aLabel = (links && links.aLabel) ? String(links.aLabel) : '';
     const aUrl   = (links && links.aUrl) ? String(links.aUrl) : '';
@@ -926,7 +919,7 @@ window.__SPLASH_LAST_OPEN_META__ = meta || {};
 
     body.innerHTML = '';
 
-    // Render provider choices as <a> with di-open-link so either approach is supported
+    // Provider choices — bind tracking directly on the <a> (most reliable)
     const mkChoiceLink = (label, url, slot) => {
       const a = document.createElement('a');
       a.className = 'di-action-pill di-open-link';
@@ -936,8 +929,48 @@ window.__SPLASH_LAST_OPEN_META__ = meta || {};
       a.rel = 'noopener noreferrer';
       a.setAttribute('data-di-slot', String(slot || ''));
       a.setAttribute('data-di-label', String(label || ''));
-       // Attach meta directly to the link element (more reliable than reading from the sheet)
-a.__diMeta = meta || {};
+
+      // Attach meta to the link so clicks always have context
+      a.__diMeta = meta || {};
+
+      // Intercept click so POST can fire before opening new tab
+      a.addEventListener('click', (ev) => {
+        try {
+          ev.preventDefault();
+          ev.stopPropagation();
+
+          const m = a.__diMeta || window.__SPLASH_LAST_OPEN_META__ || {};
+          const mCategory = String(m.category || categoryFromQuery || '');
+          const mDisplay  = String(m.display || '');
+          const mSource   = normalizeClickSource(m.source || 'user_top5');
+
+          // If we can't build canonical_id, fail open (navigate) but don't try to log
+          if (!mDisplay) {
+            window.open(url, '_blank', 'noopener,noreferrer');
+            return;
+          }
+
+          const canonical = canonicalFromDisplay(mDisplay);
+
+          if (DEBUG_LINK_CLICKS) {
+            console.log('[Splash] provider click (bound)', { mCategory, mDisplay, canonical, slot, label, mSource });
+          }
+
+          trackOutboundClick({
+            category: mCategory,
+            canonical_id: canonical,
+            display_name: mDisplay,
+            link_slot: slot || 'A',
+            link_label: label,
+            source: mSource
+          });
+
+          // Let the POST dispatch first
+          setTimeout(() => window.open(url, '_blank', 'noopener,noreferrer'), 60);
+        } catch (err) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        }
+      }, true);
 
       return a;
     };
@@ -968,7 +1001,7 @@ a.__diMeta = meta || {};
     unlockScroll();
   }
 
-  // Open modal button handler (captures meta once, centrally)
+  // Open modal button handler
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -979,17 +1012,14 @@ a.__diMeta = meta || {};
     const links = parseLooseJsonObject(rawLinks) || {};
     const meta  = parseLooseJsonObject(rawMeta)  || {};
 
-    // fallbacks
     if (!meta.category) meta.category = categoryFromQuery || '';
-    if (!meta.source) meta.source = 'user_top5';
+    meta.source = normalizeClickSource(meta.source || 'user_top5');
 
     e.preventDefault();
     showOpenDialog(links, meta);
   });
 
-  // Delegated provider click tracking:
-  // - Works for <a.di-open-link> in the modal (preferred)
-  // - Also works if a provider is rendered as a button (legacy)
+  // Close handling
   document.addEventListener('pointerdown', (e) => {
     const t = e.target;
     if (!t) return;
@@ -1000,62 +1030,6 @@ a.__diMeta = meta || {};
     const isOpen = sheet.getAttribute('aria-hidden') === 'false' && getComputedStyle(sheet).display !== 'none';
     if (!isOpen) return;
 
-    // Provider link hit?
-    const providerEl =
-      t.closest('.di-open-link') ||
-      t.closest('.di-open-sheet a[href]') ||
-      null;
-
-    if (providerEl) {
-      const meta =
-  providerEl.__diMeta ||
-  getModalMeta(sheet) ||
-  window.__SPLASH_LAST_OPEN_META__ ||
-  {};
-
-      const mCategory = String(meta.category || categoryFromQuery || '');
-      const mDisplay  = String(meta.display || '');
-      const mSource   = String(meta.source || 'user_top5');
-
-      // Attempt to infer slot and label
-      const slot =
-        providerEl.getAttribute('data-di-slot') ||
-        providerEl.getAttribute('data-slot') ||
-        providerEl.dataset.slot ||
-        providerEl.dataset.diSlot ||
-        '';
-
-      const label =
-        providerEl.getAttribute('data-di-label') ||
-        providerEl.getAttribute('aria-label') ||
-        (providerEl.textContent || '').trim() ||
-        'Open';
-
-      // If slot missing, infer by position among provider links in the open body
-      let inferredSlot = slot;
-      if (!inferredSlot) {
-        const body = sheet.querySelector('#diOpenBody');
-        const links = body ? Array.from(body.querySelectorAll('.di-open-link, a[href]')).filter(a => a && a.href) : [];
-        const idx = links.indexOf(providerEl);
-        inferredSlot = (idx === 0) ? 'A' : (idx === 1 ? 'B' : '');
-      }
-
-      const canonical = canonicalFromDisplay(mDisplay);
-
-      trackOutboundClick({
-        category: mCategory,
-        canonical_id: canonical,
-        display_name: mDisplay,
-        link_slot: inferredSlot || 'A',
-        link_label: label,
-        source: mSource
-      });
-
-      // Do NOT prevent default: allow the navigation/open to proceed
-      return;
-    }
-
-    // Close hit?
     const closeHit =
       t.closest('.di-open-x') ||
       t.closest('.di-open-sheet [aria-label="Close"]') ||
@@ -1068,67 +1042,6 @@ a.__diMeta = meta || {};
     e.stopPropagation();
     hideOpenDialog();
   }, true);
-document.addEventListener('click', (e) => {
-  // Fallback: some environments don't reliably fire pointerdown for <a target="_blank">
-  const t = e.target;
-  if (!t) return;
-
-  const providerEl =
-    t.closest('.di-open-link') ||
-    t.closest('.di-open-sheet a[href]') ||
-    null;
-
-  if (!providerEl) return;
-
-  const sheet = document.querySelector('.di-open-sheet');
-  const meta =
-    providerEl.__diMeta ||
-    (sheet ? getModalMeta(sheet) : null) ||
-    window.__SPLASH_LAST_OPEN_META__ ||
-    {};
-
-  const mCategory = String(meta.category || categoryFromQuery || '');
-  const mDisplay  = String(meta.display || '');
-  const mSource   = String(meta.source || 'user_top5');
-
-  const label =
-    providerEl.getAttribute('data-di-label') ||
-    providerEl.getAttribute('aria-label') ||
-    (providerEl.textContent || '').trim() ||
-    'Open';
-
-  let slot =
-    providerEl.getAttribute('data-di-slot') ||
-    providerEl.dataset.slot ||
-    providerEl.dataset.diSlot ||
-    '';
-
-  if (!slot && sheet) {
-    const body = sheet.querySelector('#diOpenBody');
-    const links = body ? Array.from(body.querySelectorAll('.di-open-link, a[href]')).filter(a => a && a.href) : [];
-    const idx = links.indexOf(providerEl);
-    slot = (idx === 0) ? 'A' : (idx === 1 ? 'B' : 'A');
-  }
-
-  // If display is missing, do not silently fail—log it (debug) and bail.
-  if (!mDisplay) {
-    if (DEBUG_LINK_CLICKS) console.warn('[Splash] Missing meta.display on provider click', { meta, label, slot });
-    return;
-  }
-
-  const canonical = canonicalFromDisplay(mDisplay);
-
-  if (DEBUG_LINK_CLICKS) console.log('[Splash] provider click (click fallback)', { mCategory, mDisplay, canonical, slot, label, mSource });
-
-  trackOutboundClick({
-    category: mCategory,
-    canonical_id: canonical,
-    display_name: mDisplay,
-    link_slot: slot || 'A',
-    link_label: label,
-    source: mSource
-  });
-}, true);
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideOpenDialog();
@@ -1404,7 +1317,6 @@ document.addEventListener('click', (e) => {
 
   /* =========================
      RESULTS PAGE (render lists)
-     - Adds data-di-meta to each Open button so click tracking knows item/source/category
   ========================== */
   if (isResultsPage()) {
     const getSubFromCategory = (category) => {
@@ -1487,7 +1399,6 @@ document.addEventListener('click', (e) => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // Meta for click tracking
             openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(v)}','source':'user_top5'}`);
 
             styleOpenButton(openBtn);
@@ -1579,7 +1490,6 @@ document.addEventListener('click', (e) => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // Meta for click tracking
           openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(label)}','source':'global_top100'}`);
 
           styleOpenButton(openBtn);
@@ -1603,9 +1513,6 @@ document.addEventListener('click', (e) => {
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Predict bind for Music Albums
-     + Canonical-based diff update
-     + Global diff baseline from "global applied snapshot"
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
