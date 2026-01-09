@@ -2,15 +2,15 @@
 // - No-change submits do not update timestamps
 // - Junk input is blocked from polluting global_items
 // Safe rollback anchor
-
-/* SPLASH FOOTER JS — V23.3
-   Baseline: V23.2
-   Change A (FIXED FOR REAL): Outbound click tracking to public.link_clicks
-   Notes:
-   - Supabase REST requires headers (apikey + Authorization)
-   - navigator.sendBeacon cannot send custom headers => removed
-   - Uses fetch keepalive + fires on pointerdown for maximum reliability
-*/
+//
+// SPLASH FOOTER JS — V23.4
+// Baseline: V23.3
+// Change (Feature 2 Hardening):
+// - Global diff baseline no longer relies solely on localStorage.
+// - If "global applied snapshot" is missing, derive old eligible items from the existing Supabase row.
+// - Prevents global_items drift when users clear storage / change browsers / use new devices.
+//
+// NOTE: Category policing remains minimal (People↔Cars only) to preserve user freedom.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -727,8 +727,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      A — OUTBOUND LINK CLICK TRACKING (V23.3)
-     - Supabase REST insert with required headers
-     - keepalive true so it survives tab opens
   ========================== */
   function trackOutboundClick(payload){
     try {
@@ -737,7 +735,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
       const body = JSON.stringify(payload);
 
-      // Fire-and-forget (do NOT await; keep it in the same user gesture chain)
       fetch(url, {
         method: 'POST',
         headers: {
@@ -768,8 +765,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
-     - Buttons are real <button> elements
-     - Tracking fires on pointerdown (earlier), then window.open on click
   ========================== */
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
@@ -880,7 +875,6 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
 
-      // 1) pointerdown: log as early as possible
       btn.addEventListener('pointerdown', () => {
         const canonical = canonicalFromDisplay(mDisplay);
         trackOutboundClick({
@@ -893,11 +887,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }, { passive: true });
 
-      // 2) click: open new tab (keeps browser popup rules happy)
       btn.addEventListener('click', () => {
         openInNewTab(url);
-        // If you want the modal to close after click, uncomment:
-        // hideOpenDialog();
       });
 
       return btn;
@@ -929,7 +920,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
-  // Open modal button handler (passes meta so link clicks can be attributed)
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1243,7 +1233,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      RESULTS PAGE (render lists)
-     - Adds data-di-meta to each Open button so click tracking knows item/source/category
   ========================== */
   if (isResultsPage()) {
     const getSubFromCategory = (category) => {
@@ -1326,7 +1315,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // Meta for click tracking (A)
             openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(v)}','source':'user_top5'}`);
 
             styleOpenButton(openBtn);
@@ -1418,7 +1406,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // Meta for click tracking (A)
           openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(label)}','source':'global_top100'}`);
 
           styleOpenButton(openBtn);
@@ -1445,6 +1432,7 @@ document.addEventListener('DOMContentLoaded', () => {
      + Predict bind for Music Albums
      + Canonical-based diff update
      + Global diff baseline from "global applied snapshot"
+     + V23.4: Supabase-row fallback baseline to prevent drift
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1498,6 +1486,7 @@ document.addEventListener('DOMContentLoaded', () => {
           .eq('category', category)
           .maybeSingle();
 
+        // No-change submit: do not touch timestamps; still refresh applied snapshot so global diff remains correct
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
           saveGlobalApplied(category, eligibleNew);
@@ -1523,10 +1512,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
+        // ===== V23.4 HARDENING START =====
+        // Prefer local snapshot; if missing, derive old eligible items from the existing Supabase row
         const appliedOld = loadGlobalApplied(category);
-        const oldValuesForGlobal = appliedOld ? appliedOld : [];
 
-        const cleanNew = newValues.filter(Boolean);
+        const rowOld = existingRow
+          ? [existingRow.v1, existingRow.v2, existingRow.v3, existingRow.v4, existingRow.v5]
+              .map(v => String(v || '').trim())
+              .filter(Boolean)
+          : [];
+
+        const eligibleOldFromRow = rowOld.filter(v => isGlobalEligible(category, v));
+
+        const oldValuesForGlobal = (appliedOld && appliedOld.length)
+          ? appliedOld
+          : eligibleOldFromRow;
+        // ===== V23.4 HARDENING END =====
+
+        const cleanNew = newValues.map(v => String(v || '').trim()).filter(Boolean);
         const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
