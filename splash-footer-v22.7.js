@@ -1,16 +1,17 @@
 // BASELINE — Global submit guard + junk filter verified (Jan 2026)
 // - No-change submits do not update timestamps
 // - Junk input is blocked from polluting global_items
+// - Share button ownership lock enforced on /island
+// - Global diff baseline is resilient to cleared localStorage (falls back to Supabase row)
 // Safe rollback anchor
-//
-// SPLASH FOOTER JS — V23.4
-// Baseline: V23.3
-// Change (Feature 2 Hardening):
-// - Global diff baseline no longer relies solely on localStorage.
-// - If "global applied snapshot" is missing, derive old eligible items from the existing Supabase row.
-// - Prevents global_items drift when users clear storage / change browsers / use new devices.
-//
-// NOTE: Category policing remains minimal (People↔Cars only) to preserve user freedom.
+
+/* SPLASH FOOTER JS — V23.4 (Baseline Lock)
+   Baseline: V23.3 (local working copy)
+   Changes:
+   (1) Remove ALL outbound analytics / link_clicks logic (parked; do not revive)
+   (2) Hardening: if local global-applied snapshot is missing, use Supabase existing row as diff baseline
+       This prevents global_items drift when storage is cleared / new browser / incognito.
+*/
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -22,9 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const SUPABASE_URL = 'https://ygptwdmgdpvkjopbtwaj.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
-
-  // Optional: set true temporarily while verifying
-  const DEBUG_LINK_CLICKS = false;
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
@@ -673,33 +671,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
-    if (parent === 'movies') {
-      return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'TMDB', bUrl:`https://www.themoviedb.org/search?query=${enc(title)}` };
-    }
-
-    if (parent === 'tv') {
-      return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
-    }
-
-    if (parent === 'books') {
-      return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Google Books', bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}` };
-    }
-
-    if (parent === 'games') {
-      return { aLabel:'Metacritic', aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`, bLabel:'Wikipedia', bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}` };
-    }
-
-    if (parent === 'travel') {
-      return { aLabel:'Tripadvisor', aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`, bLabel:'Maps', bUrl: maps(title) };
-    }
-
-    if (parent === 'food') {
-      return { aLabel:'Allrecipes', aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} recipe`) };
-    }
-
-    if (parent === 'cars') {
-      return { aLabel:'Google', aUrl: google(`${title} car`), bLabel:'YouTube', bUrl: youtube(`${title} car`) };
-    }
+    if (parent === 'movies') return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'TMDB', bUrl:`https://www.themoviedb.org/search?query=${enc(title)}` };
+    if (parent === 'tv')     return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
+    if (parent === 'books')  return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Google Books', bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}` };
+    if (parent === 'games')  return { aLabel:'Metacritic', aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`, bLabel:'Wikipedia', bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}` };
+    if (parent === 'travel') return { aLabel:'Tripadvisor', aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`, bLabel:'Maps', bUrl: maps(title) };
+    if (parent === 'food')   return { aLabel:'Allrecipes', aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} recipe`) };
+    if (parent === 'cars')   return { aLabel:'Google', aUrl: google(`${title} car`), bLabel:'YouTube', bUrl: youtube(`${title} car`) };
 
     return { aLabel:'Google', aUrl: google(title), bLabel:'Search', bUrl: google(title) };
   }
@@ -723,44 +701,6 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/\s/g,'-')
       .replace(/-+/g,'-')
       .replace(/^-+|-+$/g,'');
-  }
-
-  /* =========================
-     A — OUTBOUND LINK CLICK TRACKING (V23.3)
-  ========================== */
-  function trackOutboundClick(payload){
-    try {
-      if (!payload || !payload.category || !payload.canonical_id || !payload.link_slot || !payload.link_label || !payload.source) return;
-
-      const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
-      const body = JSON.stringify(payload);
-
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal'
-        },
-        body,
-        keepalive: true
-      }).then(async (res) => {
-        if (DEBUG_LINK_CLICKS) {
-          const ok = res && res.ok;
-          console.log('[Splash] link_clicks POST', ok ? 'OK' : `FAIL ${res.status}`, payload);
-          if (!ok) {
-            const t = await res.text().catch(() => '');
-            console.warn('[Splash] link_clicks response body:', t);
-          }
-        }
-      }).catch((e) => {
-        if (DEBUG_LINK_CLICKS) console.warn('[Splash] link_clicks fetch failed', e, payload);
-      });
-
-    } catch (e) {
-      if (DEBUG_LINK_CLICKS) console.warn('[Splash] trackOutboundClick exception', e);
-    }
   }
 
   /* =========================
@@ -852,7 +792,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
-  function showOpenDialog(links, meta){
+  function showOpenDialog(links){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
@@ -862,40 +802,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const bLabel = (links && links.bLabel) ? String(links.bLabel) : '';
     const bUrl   = (links && links.bUrl) ? String(links.bUrl) : '';
 
-    const m = meta || {};
-    const mCategory = String(m.category || '');
-    const mDisplay  = String(m.display || '');
-    const mSource   = String(m.source || '');
-
     body.innerHTML = '';
 
-    const mkChoiceBtn = (label, url, slot) => {
+    const mkChoiceBtn = (label, url) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
-
-      btn.addEventListener('pointerdown', () => {
-        const canonical = canonicalFromDisplay(mDisplay);
-        trackOutboundClick({
-          category: mCategory,
-          canonical_id: canonical,
-          display_name: mDisplay,
-          link_slot: slot,
-          link_label: label || '',
-          source: mSource
-        });
-      }, { passive: true });
-
-      btn.addEventListener('click', () => {
-        openInNewTab(url);
-      });
-
+      btn.addEventListener('click', () => openInNewTab(url));
       return btn;
     };
 
-    if (aUrl) body.appendChild(mkChoiceBtn(aLabel || 'Link 1', aUrl, 'A'));
-    if (bUrl) body.appendChild(mkChoiceBtn(bLabel || 'Link 2', bUrl, 'B'));
+    if (aUrl) body.appendChild(mkChoiceBtn(aLabel || 'Link 1', aUrl));
+    if (bUrl) body.appendChild(mkChoiceBtn(bLabel || 'Link 2', bUrl));
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -920,6 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
+  // Open modal button handler
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -928,12 +848,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let links = null;
     try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
 
-    const metaRaw = btn.getAttribute('data-di-meta') || '';
-    let meta = {};
-    try { meta = JSON.parse(metaRaw.replace(/'/g,'"')); } catch { meta = {}; }
-
     e.preventDefault();
-    showOpenDialog(links || {}, meta);
+    showOpenDialog(links || {});
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -1128,7 +1044,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION
+     V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1178,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY
+     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1216,8 +1132,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return true;
     }
 
-    if (parent === 'travel' || parent === 'food') return true;
-
     return true;
   }
 
@@ -1229,6 +1143,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const rowVals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
     const newVals = values.map(v => String(v || '').trim());
     return rowVals.join('||') === newVals.join('||');
+  }
+
+  function eligibleFromRow(category, row){
+    if (!row) return [];
+    const vals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim()).filter(Boolean);
+    return vals.filter(v => isGlobalEligible(category, v));
   }
 
   /* =========================
@@ -1315,8 +1235,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(v)}','source':'user_top5'}`);
-
             styleOpenButton(openBtn);
 
             li.appendChild(textSpan);
@@ -1349,7 +1267,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const { data, error } = await supabase
           .from('global_items')
-          .select('display_name, canonical_id, source, category, count')
+          .select('display_name, canonical_id, category, count')
           .eq('category', category)
           .order('count', { ascending: false })
           .limit(100);
@@ -1406,8 +1324,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          openBtn.setAttribute('data-di-meta', `{'category':'${safe(category)}','display':'${safe(label)}','source':'global_top100'}`);
-
           styleOpenButton(openBtn);
 
           right.appendChild(countEl);
@@ -1431,8 +1347,9 @@ document.addEventListener('DOMContentLoaded', () => {
      FORM SUBMISSION (OVERWRITE)
      + Predict bind for Music Albums
      + Canonical-based diff update
-     + Global diff baseline from "global applied snapshot"
-     + V23.4: Supabase-row fallback baseline to prevent drift
+     + Global diff baseline from:
+        - localStorage snapshot if present
+        - otherwise Supabase existing row (prevents drift after storage clear)
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1486,7 +1403,7 @@ document.addEventListener('DOMContentLoaded', () => {
           .eq('category', category)
           .maybeSingle();
 
-        // No-change submit: do not touch timestamps; still refresh applied snapshot so global diff remains correct
+        // No-change submit guard
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
           saveGlobalApplied(category, eligibleNew);
@@ -1498,6 +1415,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
+        // Upsert the latest list
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1512,25 +1430,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // ===== V23.4 HARDENING START =====
-        // Prefer local snapshot; if missing, derive old eligible items from the existing Supabase row
+        // -------- Baseline selection (prevents drift)
+        // Prefer local snapshot, else fall back to existing Supabase row.
         const appliedOld = loadGlobalApplied(category);
-
-        const rowOld = existingRow
-          ? [existingRow.v1, existingRow.v2, existingRow.v3, existingRow.v4, existingRow.v5]
-              .map(v => String(v || '').trim())
-              .filter(Boolean)
-          : [];
-
-        const eligibleOldFromRow = rowOld.filter(v => isGlobalEligible(category, v));
-
-        const oldValuesForGlobal = (appliedOld && appliedOld.length)
+        const oldValuesForGlobal = appliedOld
           ? appliedOld
-          : eligibleOldFromRow;
-        // ===== V23.4 HARDENING END =====
+          : eligibleFromRow(category, existingRow);
 
-        const cleanNew = newValues.map(v => String(v || '').trim()).filter(Boolean);
-        const eligibleNew = cleanNew.filter(v => isGlobalEligible(category, v));
+        const eligibleNew = newValues
+          .filter(Boolean)
+          .filter(v => isGlobalEligible(category, v));
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
