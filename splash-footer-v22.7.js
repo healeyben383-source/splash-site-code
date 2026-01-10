@@ -1,9 +1,8 @@
-// SPLASH FOOTER JS — V23.8.1 (Analytics Locked + A1 link_clicks redirect-safe open)
+// SPLASH FOOTER JS — V23.8 (Analytics Locked)
 // BASELINE: Feature 2 passed + QW2/QW3 analytics (queue + flush-safe)
 // - Feature 2 global integrity unchanged
 // - QW2: analytics helper (fail-silent) + UUID-safe session_id + queue/flush to survive redirects
 // - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
-// - A1: link_clicks logging uses about:blank open + before-navigate hook (prevents lost inserts)
 // Safe rollback anchor
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -177,32 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       // silent by design
     }
-  }
-
-  /* =========================
-     A1 — LINK CLICKS (redirect-safe)
-     NOTE: keep schema minimal to avoid column mismatches.
-  ========================== */
-  function logLinkClick(payload = {}) {
-    try {
-      if (!supabase) return;
-
-      const row = {
-        category: String(payload.category || '').trim().toLowerCase() || null,
-        link_slot: String(payload.link_slot || '').trim() || null,
-        link_label: String(payload.link_label || '').trim() || null,
-        link_url: String(payload.link_url || '').trim() || null,
-        page: window.location.pathname || '',
-        list_id: uuidOrNull(payload.list_id),
-        session_id: getSessionId(),
-        source: 'client'
-      };
-
-      supabase
-        .from('link_clicks')
-        .insert(row)
-        .catch(() => {});
-    } catch {}
   }
 
   /* =========================
@@ -420,7 +393,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     inputEl.addEventListener('focus', () => {
       if (inputEl.dataset.splashPrefilled === '1') {
-        setTimeout(() => controversies?.select?.call?.(inputEl), 0);
         setTimeout(() => { try { inputEl.select(); } catch (e) {} }, 0);
       }
     });
@@ -985,22 +957,10 @@ document.addEventListener('DOMContentLoaded', () => {
     delete b.dataset.__diPrevHtmlOverflow;
   }
 
-  // A1: about:blank open + hook before navigation (prevents lost inserts)
-  function openInNewTab(url, onBeforeNavigate) {
+  function openInNewTab(url){
     const u = String(url || '').trim();
     if (!u || u === '#') return;
-
-    const w = window.open('about:blank', '_blank', 'noopener,noreferrer');
-
-    try {
-      if (typeof onBeforeNavigate === 'function') onBeforeNavigate();
-    } catch(e) {}
-
-    if (w) {
-      try { w.location = u; } catch(e) {}
-    } else {
-      window.open(u, '_blank', 'noopener,noreferrer');
-    }
+    window.open(u, '_blank', 'noopener,noreferrer');
   }
 
   function showOpenDialog(links){
@@ -1015,29 +975,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     body.innerHTML = '';
 
-    const mkChoiceBtn = (slot, label, url) => {
+    const mkChoiceBtn = (label, url) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
-
-      btn.addEventListener('click', () => {
-        openInNewTab(url, () => {
-          logLinkClick({
-            category: (categoryFromQuery || '').toLowerCase() || null,
-            link_slot: slot,
-            link_label: label,
-            link_url: url,
-            list_id: viewerListId
-          });
-        });
-      });
-
+      btn.addEventListener('click', () => openInNewTab(url));
       return btn;
     };
 
-    if (aUrl) body.appendChild(mkChoiceBtn('a', aLabel || 'Link 1', aUrl));
-    if (bUrl) body.appendChild(mkChoiceBtn('b', bLabel || 'Link 2', bUrl));
+    if (aUrl) body.appendChild(mkChoiceBtn(aLabel || 'Link 1', aUrl));
+    if (bUrl) body.appendChild(mkChoiceBtn(bLabel || 'Link 2', bUrl));
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
