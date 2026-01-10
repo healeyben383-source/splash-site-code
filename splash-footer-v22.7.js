@@ -1,3 +1,5 @@
+// BASELINE V23.5 — Feature 2 passed (do not modify without verification)
+
 // BASELINE — Global submit guard + junk filter verified (Jan 2026)
 // - No-change submits do not update timestamps
 // - Junk input is blocked from polluting global_items
