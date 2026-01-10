@@ -1,6 +1,7 @@
-// BASELINE V23.7 — Feature 2 passed + QW2/QW3 analytics
+// SPLASH FOOTER JS — V23.8
+// BASELINE V23.8 — Feature 2 passed + QW2/QW3 analytics (queued + flush-safe)
 // - Feature 2 global integrity unchanged
-// - QW2: analytics helper (fail-silent) + UUID-safe session_id
+// - QW2: analytics helper now uses localStorage queue + keepalive flush (reduces lost events on redirects)
 // - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
 // Safe rollback anchor
 
@@ -19,12 +20,15 @@ document.addEventListener('DOMContentLoaded', () => {
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
   /* =========================
-     QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING
+     QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
      - session_id is uuid NOT NULL → MUST always be valid UUID
      - list_id is uuid nullable → only send if valid UUID else null
-     - Never blocks UX, fire-and-forget
+     - Never blocks UX, queue + flush in background
   ========================== */
   const ANALYTICS_SESSION_KEY = 'splash_session_id';
+  const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
+  const ANALYTICS_QUEUE_MAX = 200;
+  const ANALYTICS_FLUSH_CHUNK = 25;
 
   function uuidv4Fallback(){
     // RFC4122-ish v4 fallback using Math.random (sufficient for session IDs)
@@ -57,9 +61,105 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function readQueue(){
+    try {
+      const raw = localStorage.getItem(ANALYTICS_QUEUE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeQueue(arr){
+    try {
+      localStorage.setItem(ANALYTICS_QUEUE_KEY, JSON.stringify(arr));
+    } catch {
+      // If storage is full or blocked, do nothing (fail-silent).
+    }
+  }
+
+  function enqueueEvent(payload){
+    try {
+      const q = readQueue();
+      q.push(payload);
+
+      // Trim oldest if over cap
+      if (q.length > ANALYTICS_QUEUE_MAX) {
+        q.splice(0, q.length - ANALYTICS_QUEUE_MAX);
+      }
+      writeQueue(q);
+    } catch {
+      // silent
+    }
+  }
+
+  let __FLUSHING__ = false;
+
+  async function postAnalyticsBatchKeepalive(batch){
+    // Supabase REST insert with keepalive to survive navigation better
+    const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_PUBLISHABLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(batch),
+      keepalive: true
+    });
+
+    // 201/204 are typical for return=minimal inserts
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
+    }
+  }
+
+  async function flushQueue(){
+    if (__FLUSHING__) return;
+    __FLUSHING__ = true;
+
+    try {
+      let q = readQueue();
+      if (!q.length) return;
+
+      // Send in chunks; remove only on success
+      while (q.length) {
+        const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
+
+        // If no Supabase client loaded, still attempt REST (we use fetch directly anyway)
+        await postAnalyticsBatchKeepalive(batch);
+
+        // Remove sent
+        q = q.slice(batch.length);
+        writeQueue(q);
+      }
+    } catch {
+      // leave queue intact for next attempt
+    } finally {
+      __FLUSHING__ = false;
+    }
+  }
+
+  // Flush on load and opportunistically
+  flushQueue();
+  setTimeout(flushQueue, 1500);
+  setInterval(flushQueue, 15000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushQueue();
+  }, { passive: true });
+
+  window.addEventListener('pagehide', () => {
+    flushQueue();
+  }, { passive: true });
+
   function logEvent(event_name, meta = {}) {
     try {
-      if (!supabase || !event_name) return;
+      if (!event_name) return;
 
       const payload = {
         event_name,
@@ -70,10 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
         meta
       };
 
-      supabase
-        .from('analytics_events')
-        .insert(payload)
-        .catch(() => {});
+      enqueueEvent(payload);
+      // fire-and-forget flush attempt
+      flushQueue();
     } catch {
       // silent by design
     }
