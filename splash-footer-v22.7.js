@@ -1,8 +1,9 @@
-// SPLASH FOOTER JS — V23.9 (Analytics Locked + A1 Link Clicks)
-// BASELINE: V23.8 stable (Feature 2 passed + QW2/QW3 analytics queue/flush-safe)
-// ADD: A1 — redirect-safe link_clicks logging (queue + keepalive flush + about:blank open)
+// SPLASH FOOTER JS — V23.8.1 (Analytics Locked + A1 link_clicks redirect-safe open)
+// BASELINE: Feature 2 passed + QW2/QW3 analytics (queue + flush-safe)
 // - Feature 2 global integrity unchanged
-// - QW2/QW3 analytics unchanged
+// - QW2: analytics helper (fail-silent) + UUID-safe session_id + queue/flush to survive redirects
+// - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
+// - A1: link_clicks logging uses about:blank open + before-navigate hook (prevents lost inserts)
 // Safe rollback anchor
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -180,113 +181,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      A1 — LINK CLICKS (redirect-safe)
-     - Dedicated queue + keepalive flush (mirrors analytics_events)
-     - Never blocks UX; survives tab open/navigation
-     IMPORTANT: If your link_clicks table does not include some columns below,
-                remove them from the row object to avoid silent insert failure.
+     NOTE: keep schema minimal to avoid column mismatches.
   ========================== */
-  const LINKCLICKS_QUEUE_KEY = 'splash_linkclicks_queue_v1';
-  const LINKCLICKS_QUEUE_MAX = 400;
-  const LINKCLICKS_FLUSH_CHUNK = 25;
-
-  function readLinkQueue(){
-    try {
-      const raw = localStorage.getItem(LINKCLICKS_QUEUE_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function writeLinkQueue(arr){
-    try { localStorage.setItem(LINKCLICKS_QUEUE_KEY, JSON.stringify(arr)); } catch {}
-  }
-
-  function enqueueLinkClick(row){
-    try {
-      const q = readLinkQueue();
-      q.push(row);
-      if (q.length > LINKCLICKS_QUEUE_MAX) q.splice(0, q.length - LINKCLICKS_QUEUE_MAX);
-      writeLinkQueue(q);
-    } catch {}
-  }
-
-  let __FLUSHING_LINKS__ = false;
-
-  async function postLinkClicksBatchKeepalive(batch){
-    const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_PUBLISHABLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify(batch),
-      keepalive: true
-    });
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`link_clicks insert failed: ${res.status} ${txt || ''}`.trim());
-    }
-  }
-
-  async function flushLinkQueue(){
-    if (__FLUSHING_LINKS__) return;
-    __FLUSHING_LINKS__ = true;
-
-    try {
-      let q = readLinkQueue();
-      if (!q.length) return;
-
-      while (q.length) {
-        const batch = q.slice(0, LINKCLICKS_FLUSH_CHUNK);
-        await postLinkClicksBatchKeepalive(batch);
-        q = q.slice(batch.length);
-        writeLinkQueue(q);
-      }
-    } catch {
-      // leave queue intact
-    } finally {
-      __FLUSHING_LINKS__ = false;
-    }
-  }
-
-  // opportunistic flush
-  setTimeout(flushLinkQueue, 800);
-  setInterval(flushLinkQueue, 15000);
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') flushLinkQueue();
-  }, { passive: true });
-
-  window.addEventListener('pagehide', () => {
-    flushLinkQueue();
-  }, { passive: true });
-
   function logLinkClick(payload = {}) {
     try {
+      if (!supabase) return;
+
       const row = {
         category: String(payload.category || '').trim().toLowerCase() || null,
-        canonical_id: String(payload.canonical_id || '').trim() || null,
-        display_name: String(payload.display_name || '').trim() || null,
-        link_slot: String(payload.link_slot || '').trim() || null,   // 'a' | 'b'
-        link_label: String(payload.link_label || '').trim() || null, // 'Spotify' etc.
+        link_slot: String(payload.link_slot || '').trim() || null,
+        link_label: String(payload.link_label || '').trim() || null,
         link_url: String(payload.link_url || '').trim() || null,
         page: window.location.pathname || '',
         list_id: uuidOrNull(payload.list_id),
         session_id: getSessionId(),
-        source: String(payload.source || 'client')
+        source: 'client'
       };
 
-      enqueueLinkClick(row);
-      flushLinkQueue();
-    } catch {
-      // silent by design
-    }
+      supabase
+        .from('link_clicks')
+        .insert(row)
+        .catch(() => {});
+    } catch {}
   }
 
   /* =========================
@@ -504,6 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     inputEl.addEventListener('focus', () => {
       if (inputEl.dataset.splashPrefilled === '1') {
+        setTimeout(() => controversies?.select?.call?.(inputEl), 0);
         setTimeout(() => { try { inputEl.select(); } catch (e) {} }, 0);
       }
     });
@@ -1068,8 +985,8 @@ document.addEventListener('DOMContentLoaded', () => {
     delete b.dataset.__diPrevHtmlOverflow;
   }
 
-  // A1 — open-first to preserve gesture; log before navigating
-  function openInNewTab(url, onBeforeNavigate){
+  // A1: about:blank open + hook before navigation (prevents lost inserts)
+  function openInNewTab(url, onBeforeNavigate) {
     const u = String(url || '').trim();
     if (!u || u === '#') return;
 
@@ -1082,12 +999,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (w) {
       try { w.location = u; } catch(e) {}
     } else {
-      // fallback if popup blocked
       window.open(u, '_blank', 'noopener,noreferrer');
     }
   }
 
-  function showOpenDialog(links, meta){
+  function showOpenDialog(links){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
@@ -1108,19 +1024,13 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', () => {
         openInNewTab(url, () => {
           logLinkClick({
-            category: meta && meta.category,
-            canonical_id: meta && meta.canonical_id,
-            display_name: meta && meta.display_name,
-            list_id: meta && meta.list_id,
-            source: meta && meta.source,
+            category: (categoryFromQuery || '').toLowerCase() || null,
             link_slot: slot,
             link_label: label,
-            link_url: url
+            link_url: url,
+            list_id: viewerListId
           });
         });
-
-        // optional: close after click
-        hideOpenDialog();
       });
 
       return btn;
@@ -1160,14 +1070,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let links = null;
     try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
 
-    let meta = null;
-    try {
-      const m = btn.getAttribute('data-di-meta') || '';
-      meta = m ? JSON.parse(m) : null;
-    } catch { meta = null; }
-
     e.preventDefault();
-    showOpenDialog(links || {}, meta || {});
+    showOpenDialog(links || {});
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -1589,15 +1493,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // A1 — pass context for link_clicks logging
-            openBtn.setAttribute('data-di-meta', JSON.stringify({
-              category: category,
-              list_id: listId,
-              display_name: v,
-              canonical_id: canonicalFromDisplay(v),
-              source: 'results_user_list'
-            }));
-
             styleOpenButton(openBtn);
 
             li.appendChild(textSpan);
@@ -1686,15 +1581,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const safe = (s) => (s || '').replace(/'/g, '');
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
-
-          // A1 — pass context for link_clicks logging
-          openBtn.setAttribute('data-di-meta', JSON.stringify({
-            category: category,
-            list_id: listId,
-            display_name: label,
-            canonical_id: canonicalFromDisplay(label),
-            source: 'results_global_list'
-          }));
 
           styleOpenButton(openBtn);
 
