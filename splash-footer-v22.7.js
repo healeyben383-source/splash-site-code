@@ -1,9 +1,9 @@
-// SPLASH FOOTER JS — V23.8 (Analytics Locked)
-// BASELINE: Feature 2 passed + QW2/QW3 analytics (queue + flush-safe)
-// - Feature 2 global integrity unchanged
-// - QW2: analytics helper (fail-silent) + UUID-safe session_id + queue/flush to survive redirects
-// - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
-// Safe rollback anchor
+// SPLASH FOOTER JS — V23.9 (Analytics Locked + Link Clicks Fixed)
+// BASELINE: V23.8 (Analytics Locked)
+// Adds: link_clicks logging via REST keepalive (constraint-safe: source + link_slot)
+// - link_slot forced to 'A'/'B' only
+// - source forced to 'user_top5'/'global_top100' only
+// - non-blocking (never prevents opening link)
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -130,7 +130,6 @@ document.addEventListener('DOMContentLoaded', () => {
       while (q.length) {
         const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
 
-        // If no Supabase client loaded, still attempt REST (we use fetch directly anyway)
         await postAnalyticsBatchKeepalive(batch);
 
         // Remove sent
@@ -171,10 +170,53 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       enqueueEvent(payload);
-      // fire-and-forget flush attempt
       flushQueue();
     } catch {
       // silent by design
+    }
+  }
+
+  /* =========================
+     LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+     Table: public.link_clicks
+     Constraints:
+       - link_slot must be 'A' or 'B'
+       - source must be 'user_top5' or 'global_top100'
+  ========================== */
+  async function insertLinkClickKeepalive(row){
+    try {
+      const payload = {
+        category: row.category || null,
+        canonical_id: row.canonical_id || null,
+        display_name: row.display_name || null,
+        link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
+        link_label: row.link_label || null,
+        source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
+        page: row.page || (window.location.pathname || null),
+        url: row.url || null,
+        list_id: row.list_id || null
+      };
+
+      // Hard guard against constraint failure
+      if (!payload.category) return;
+      if (!payload.link_slot) return;
+      if (!payload.link_label) return;
+      if (!payload.source) return;
+
+      const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_PUBLISHABLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(() => {});
+    } catch {
+      // fail-silent by design
     }
   }
 
@@ -963,7 +1005,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
-  function showOpenDialog(links){
+  // UPDATED: now accepts meta (category/source/list_id/display/canonical)
+  function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
     if (!body) return;
@@ -975,17 +1018,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     body.innerHTML = '';
 
-    const mkChoiceBtn = (label, url) => {
+    const mkChoiceBtn = (slot, label, url) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'di-action-pill';
       btn.textContent = label || 'Open';
-      btn.addEventListener('click', () => openInNewTab(url));
+
+      btn.addEventListener('click', () => {
+        // Log first (non-blocking), then open
+        insertLinkClickKeepalive({
+          category: meta?.category || null,
+          canonical_id: meta?.canonical_id || null,
+          display_name: meta?.display_name || null,
+          link_slot: slot, // 'A' or 'B'
+          link_label: String(label || ''),
+          source: meta?.source || null, // 'user_top5' or 'global_top100'
+          page: meta?.page || (window.location.pathname || ''),
+          url: String(url || ''),
+          list_id: meta?.list_id || null
+        });
+
+        openInNewTab(url);
+      });
+
       return btn;
     };
 
-    if (aUrl) body.appendChild(mkChoiceBtn(aLabel || 'Link 1', aUrl));
-    if (bUrl) body.appendChild(mkChoiceBtn(bLabel || 'Link 2', bUrl));
+    if (aUrl) body.appendChild(mkChoiceBtn('A', aLabel || 'Link 1', aUrl));
+    if (bUrl) body.appendChild(mkChoiceBtn('B', bLabel || 'Link 2', bUrl));
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -1010,6 +1070,7 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
+  // UPDATED: reads meta and passes into dialog
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1018,8 +1079,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let links = null;
     try { links = JSON.parse(raw.replace(/'/g,'"')); } catch { links = null; }
 
+    const rawMeta = btn.getAttribute('data-di-meta') || '';
+    let meta = null;
+    try { meta = rawMeta ? JSON.parse(rawMeta) : null; } catch { meta = null; }
+
     e.preventDefault();
-    showOpenDialog(links || {});
+    showOpenDialog(links || {}, meta || {});
   });
 
   document.addEventListener('pointerdown', (e) => {
@@ -1441,6 +1506,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
+            // NEW: meta for link_clicks (source + slot constraints)
+            const meta = {
+              category: category,
+              canonical_id: canonicalFromDisplay(v),
+              display_name: v,
+              source: 'user_top5',
+              page: '/results',
+              list_id: viewerListId
+            };
+            openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
+
             styleOpenButton(openBtn);
 
             li.appendChild(textSpan);
@@ -1529,6 +1605,17 @@ document.addEventListener('DOMContentLoaded', () => {
           const safe = (s) => (s || '').replace(/'/g, '');
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
+
+          // NEW: meta for link_clicks (source + slot constraints)
+          const meta = {
+            category: category,
+            canonical_id: canonicalFromDisplay(label),
+            display_name: label,
+            source: 'global_top100',
+            page: '/results',
+            list_id: viewerListId
+          };
+          openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
           styleOpenButton(openBtn);
 
