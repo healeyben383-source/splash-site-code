@@ -5,12 +5,15 @@
 // - Global diff baseline is resilient to cleared localStorage (falls back to Supabase row)
 // Safe rollback anchor
 
-/* SPLASH FOOTER JS — V23.4 (Baseline Lock)
-   Baseline: V23.3 (local working copy)
+/* SPLASH FOOTER JS — V23.5 (Feature 2 — Global Integrity, Light-Touch)
+   Baseline: V23.4 (Baseline Lock)
    Changes:
-   (1) Remove ALL outbound analytics / link_clicks logic (parked; do not revive)
-   (2) Hardening: if local global-applied snapshot is missing, use Supabase existing row as diff baseline
-       This prevents global_items drift when storage is cleared / new browser / incognito.
+   (1) Add parent routes + aliases for people + wildcard (nav/back-button parity)
+   (2) Global eligibility becomes "reasoned" (high-confidence mismatch filtering only)
+       - User can still save anything to their own list
+       - Global Splash gets protected from obvious cross-category corruption
+   (3) When something is excluded from Global, store a debug record in localStorage:
+       splash_global_skipped_<category> = [{ value, reason, ts }]
 */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -28,14 +31,16 @@ document.addEventListener('DOMContentLoaded', () => {
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
   const PARENT_ROUTES = {
-    music:  '/music',
-    movies: '/movies',
-    books:  '/books',
-    tv:     '/tv',
-    travel: '/travel',
-    food:   '/food',
-    cars:   '/cars',
-    games:  '/games'
+    music:    '/music',
+    movies:   '/movies',
+    books:    '/books',
+    tv:       '/tv',
+    travel:   '/travel',
+    food:     '/food',
+    cars:     '/cars',
+    games:    '/games',
+    people:   '/people',
+    wildcard: '/wildcard'
   };
 
   const PARENT_ALIASES = {
@@ -46,7 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
     travel: 'travel',
     food: 'food',
     cars: 'cars', car: 'cars',
-    games: 'games', game: 'games'
+    games: 'games', game: 'games',
+    people: 'people', person: 'people',
+    wildcard: 'wildcard'
   };
 
   const PARENT_DISPLAY = {
@@ -57,7 +64,9 @@ document.addEventListener('DOMContentLoaded', () => {
     travel: 'Travel',
     food: 'Food',
     cars: 'Cars',
-    games: 'Games'
+    games: 'Games',
+    people: 'People',
+    wildcard: 'Wildcard'
   };
 
   const enc = encodeURIComponent;
@@ -1044,6 +1053,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
+     FEATURE 2 — GLOBAL SKIP DEBUG (local only; no UX impact)
+  ========================== */
+  function recordGlobalSkip(category, value, reason){
+    const key = `splash_global_skipped_${String(category || '').trim().toLowerCase()}`;
+    const entry = { value: String(value || ''), reason: String(reason || ''), ts: new Date().toISOString() };
+
+    try {
+      const raw = localStorage.getItem(key);
+      const arr = raw ? (safeJsonParse(raw) || []) : [];
+      arr.unshift(entry);
+      localStorage.setItem(key, JSON.stringify(arr.slice(0, 40)));
+    } catch(e) {}
+  }
+
+  /* =========================
      V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
   ========================== */
   function isProbablyUrlOrEmail(s){
@@ -1094,7 +1118,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
+     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
+     - IMPORTANT: this does NOT block saving to the user’s list
+     - It only decides if an item should be counted in Global Splash
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1117,22 +1143,41 @@ document.addEventListener('DOMContentLoaded', () => {
     return false;
   }
 
-  function isGlobalEligible(category, value){
+  function globalEligibility(category, value){
     const parent = getParentFromCategory(category);
     const v = String(value || '').trim();
-    if (!v) return false;
+    if (!v) return { ok:false, reason:'empty' };
 
+    // If something was able to pass validateTop5, it already avoided URLs/emails/junk,
+    // but we keep this as belt-and-suspenders in case the flow changes later.
+    if (isProbablyUrlOrEmail(v)) return { ok:false, reason:'url_or_email' };
+    if (isObviousJunkToken(v)) return { ok:false, reason:'junk_token' };
+
+    // High-confidence mismatch rules only (minimise false positives)
     if (parent === 'people') {
-      if (looksLikeCarEntry(v)) return false;
-      return true;
+      if (looksLikeCarEntry(v)) return { ok:false, reason:'looks_like_car_in_people' };
+      return { ok:true, reason:'' };
     }
 
     if (parent === 'cars') {
-      if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return false;
-      return true;
+      if (looksLikePersonName(v) && !looksLikeCarEntry(v)) return { ok:false, reason:'looks_like_person_in_cars' };
+      return { ok:true, reason:'' };
     }
 
-    return true;
+    // Everything else: allow by default (freedom-first).
+    return { ok:true, reason:'' };
+  }
+
+  function eligibleValuesForGlobal(category, values){
+    const out = [];
+    values.forEach(v => {
+      const vv = String(v || '').trim();
+      if (!vv) return;
+      const g = globalEligibility(category, vv);
+      if (g.ok) out.push(vv);
+      else recordGlobalSkip(category, vv, g.reason || 'not_eligible');
+    });
+    return out;
   }
 
   /* =========================
@@ -1147,8 +1192,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function eligibleFromRow(category, row){
     if (!row) return [];
-    const vals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim()).filter(Boolean);
-    return vals.filter(v => isGlobalEligible(category, v));
+    const vals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
+    return eligibleValuesForGlobal(category, vals);
   }
 
   /* =========================
@@ -1405,7 +1450,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // No-change submit guard
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
-          const eligibleNew = newValues.filter(Boolean).filter(v => isGlobalEligible(category, v));
+          const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
 
           window.location.href =
@@ -1415,7 +1460,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert the latest list
+        // Upsert the latest list (always)
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1437,9 +1482,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ? appliedOld
           : eligibleFromRow(category, existingRow);
 
-        const eligibleNew = newValues
-          .filter(Boolean)
-          .filter(v => isGlobalEligible(category, v));
+        const eligibleNew = eligibleValuesForGlobal(category, newValues);
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
