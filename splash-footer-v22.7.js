@@ -32,6 +32,51 @@ document.addEventListener('DOMContentLoaded', () => {
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
+   /* =========================
+   QW2 — ANALYTICS HELPER (FAIL-SILENT)
+   - INSERT only
+   - Never blocks UX
+   - No reads
+========================= */
+const ANALYTICS_SESSION_KEY = 'splash_session_id';
+
+function getSessionId(){
+  try {
+    let sid = localStorage.getItem(ANALYTICS_SESSION_KEY);
+    if (!sid) {
+      sid = (crypto.randomUUID && crypto.randomUUID()) ||
+            (Date.now() + '-' + Math.random().toString(16).slice(2));
+      localStorage.setItem(ANALYTICS_SESSION_KEY, sid);
+    }
+    return sid;
+  } catch {
+    return null;
+  }
+}
+
+function logEvent(event_name, meta = {}) {
+  try {
+    if (!supabase || !event_name) return;
+
+    const payload = {
+      event_name,
+      page: window.location.pathname || '',
+      category: meta.category || null,
+      list_id: meta.list_id || null,
+      session_id: getSessionId(),
+      meta
+    };
+
+    // Fire-and-forget
+    supabase
+      .from('analytics_events')
+      .insert(payload)
+      .catch(() => {});
+  } catch {
+    // Silent by design
+  }
+}
+
   const PARENT_ROUTES = {
     music:    '/music',
     movies:   '/movies',
