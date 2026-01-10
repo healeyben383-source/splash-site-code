@@ -1,7 +1,7 @@
-// SPLASH FOOTER JS — V23.8
-// BASELINE V23.8 — Feature 2 passed + QW2/QW3 analytics (queued + flush-safe)
+// SPLASH FOOTER JS — V23.8 (Analytics Locked)
+// BASELINE: Feature 2 passed + QW2/QW3 analytics (queue + flush-safe)
 // - Feature 2 global integrity unchanged
-// - QW2: analytics helper now uses localStorage queue + keepalive flush (reduces lost events on redirects)
+// - QW2: analytics helper (fail-silent) + UUID-safe session_id + queue/flush to survive redirects
 // - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
 // Safe rollback anchor
 
