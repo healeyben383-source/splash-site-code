@@ -183,42 +183,54 @@ document.addEventListener('DOMContentLoaded', () => {
        - link_slot must be 'A' or 'B'
        - source must be 'user_top5' or 'global_top100'
   ========================== */
-  async function insertLinkClickKeepalive(row){
-    try {
-      const payload = {
-        category: row.category || null,
-        canonical_id: row.canonical_id || null,
-        display_name: row.display_name || null,
-        link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
-        link_label: row.link_label || null,
-        source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
-        page: row.page || (window.location.pathname || null),
-        url: row.url || null,
-        list_id: row.list_id || null
-      };
+ async function insertLinkClickKeepalive(row){
+  try {
+    const payload = {
+      category: row.category || null,
+      canonical_id: row.canonical_id || null,
+      display_name: row.display_name || null,
+      link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
+      link_label: row.link_label || null,
+      source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
+      page: row.page || (window.location.pathname || null),
+      url: row.url || null,
+      list_id: row.list_id || null
+    };
 
-      // Hard guard against constraint failure
-      if (!payload.category) return;
-      if (!payload.link_slot) return;
-      if (!payload.link_label) return;
-      if (!payload.source) return;
+    // Hard guard against constraint failure
+    if (!payload.category) return;
+    if (!payload.link_slot) return;
+    if (!payload.link_label) return;
+    if (!payload.source) return;
+    if (!payload.url) return;
 
-      const url = `${SUPABASE_URL}/rest/v1/link_clicks`;
-      await fetch(url, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_PUBLISHABLE_KEY,
-          'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(payload),
-        keepalive: true
-      }).catch(() => {});
-    } catch {
-      // fail-silent by design
+    const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_PUBLISHABLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+
+    // IMPORTANT: do not fail silently during diagnosis
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
+    } else {
+      console.log('[Splash link_clicks] inserted', payload);
     }
+
+  } catch (e) {
+    console.error('[Splash link_clicks] exception', e);
   }
+}
+
 
   /* =========================
      PARENT ROUTES + LABELS
