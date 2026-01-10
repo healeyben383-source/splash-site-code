@@ -1,22 +1,8 @@
-// BASELINE V23.5 — Feature 2 passed (do not modify without verification)
-
-// BASELINE — Global submit guard + junk filter verified (Jan 2026)
-// - No-change submits do not update timestamps
-// - Junk input is blocked from polluting global_items
-// - Share button ownership lock enforced on /island
-// - Global diff baseline is resilient to cleared localStorage (falls back to Supabase row)
+// BASELINE V23.7 — Feature 2 passed + QW2/QW3 analytics
+// - Feature 2 global integrity unchanged
+// - QW2: analytics helper (fail-silent) + UUID-safe session_id
+// - QW3: instruments 6 core events (visit, results_view, submit_click, submit_success, submit_error, item_changed)
 // Safe rollback anchor
-
-/* SPLASH FOOTER JS — V23.5 (Feature 2 — Global Integrity, Light-Touch)
-   Baseline: V23.4 (Baseline Lock)
-   Changes:
-   (1) Add parent routes + aliases for people + wildcard (nav/back-button parity)
-   (2) Global eligibility becomes "reasoned" (high-confidence mismatch filtering only)
-       - User can still save anything to their own list
-       - Global Splash gets protected from obvious cross-category corruption
-   (3) When something is excluded from Global, store a debug record in localStorage:
-       splash_global_skipped_<category> = [{ value, reason, ts }]
-*/
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -32,51 +18,70 @@ document.addEventListener('DOMContentLoaded', () => {
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
-   /* =========================
-   QW2 — ANALYTICS HELPER (FAIL-SILENT)
-   - INSERT only
-   - Never blocks UX
-   - No reads
-========================= */
-const ANALYTICS_SESSION_KEY = 'splash_session_id';
+  /* =========================
+     QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING
+     - session_id is uuid NOT NULL → MUST always be valid UUID
+     - list_id is uuid nullable → only send if valid UUID else null
+     - Never blocks UX, fire-and-forget
+  ========================== */
+  const ANALYTICS_SESSION_KEY = 'splash_session_id';
 
-function getSessionId(){
-  try {
-    let sid = localStorage.getItem(ANALYTICS_SESSION_KEY);
-    if (!sid) {
-      sid = (crypto.randomUUID && crypto.randomUUID()) ||
-            (Date.now() + '-' + Math.random().toString(16).slice(2));
-      localStorage.setItem(ANALYTICS_SESSION_KEY, sid);
+  function uuidv4Fallback(){
+    // RFC4122-ish v4 fallback using Math.random (sufficient for session IDs)
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = (c === 'x') ? r : ((r & 0x3) | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  function uuidOrNull(v){
+    const s = String(v || '').trim();
+    const re = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return re.test(s) ? s : null;
+  }
+
+  function getSessionId(){
+    try {
+      let sid = localStorage.getItem(ANALYTICS_SESSION_KEY);
+      sid = uuidOrNull(sid);
+
+      if (!sid) {
+        sid = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
+        localStorage.setItem(ANALYTICS_SESSION_KEY, sid);
+      }
+      return sid;
+    } catch {
+      // Must still return a UUID because session_id is uuid NOT NULL
+      return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
     }
-    return sid;
-  } catch {
-    return null;
   }
-}
 
-function logEvent(event_name, meta = {}) {
-  try {
-    if (!supabase || !event_name) return;
+  function logEvent(event_name, meta = {}) {
+    try {
+      if (!supabase || !event_name) return;
 
-    const payload = {
-      event_name,
-      page: window.location.pathname || '',
-      category: meta.category || null,
-      list_id: meta.list_id || null,
-      session_id: getSessionId(),
-      meta
-    };
+      const payload = {
+        event_name,
+        page: window.location.pathname || '',
+        category: meta.category || null,
+        list_id: uuidOrNull(meta.list_id),
+        session_id: getSessionId(),
+        meta
+      };
 
-    // Fire-and-forget
-    supabase
-      .from('analytics_events')
-      .insert(payload)
-      .catch(() => {});
-  } catch {
-    // Silent by design
+      supabase
+        .from('analytics_events')
+        .insert(payload)
+        .catch(() => {});
+    } catch {
+      // silent by design
+    }
   }
-}
 
+  /* =========================
+     PARENT ROUTES + LABELS
+  ========================== */
   const PARENT_ROUTES = {
     music:    '/music',
     movies:   '/movies',
@@ -160,6 +165,17 @@ function logEvent(event_name, meta = {}) {
   const isIslandOwner = !isIslandPage()
     ? true
     : ((islandListId || viewerListId) === viewerListId);
+
+  /* =========================
+     QW3 — VISIT (one per page load)
+  ========================== */
+  const visitCategory = (categoryFromQuery || '').trim().toLowerCase() || null;
+  logEvent('visit', {
+    category: visitCategory,
+    list_id: listId,
+    is_island: isIslandPage(),
+    is_owner: isIslandOwner
+  });
 
   /* =========================
      ISLAND "CAPTURED ON" DATE (V22.7)
@@ -895,7 +911,6 @@ function logEvent(event_name, meta = {}) {
     unlockScroll();
   }
 
-  // Open modal button handler
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1166,8 +1181,6 @@ function logEvent(event_name, meta = {}) {
 
   /* =========================
      FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
-     - IMPORTANT: this does NOT block saving to the user’s list
-     - It only decides if an item should be counted in Global Splash
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1195,12 +1208,9 @@ function logEvent(event_name, meta = {}) {
     const v = String(value || '').trim();
     if (!v) return { ok:false, reason:'empty' };
 
-    // If something was able to pass validateTop5, it already avoided URLs/emails/junk,
-    // but we keep this as belt-and-suspenders in case the flow changes later.
     if (isProbablyUrlOrEmail(v)) return { ok:false, reason:'url_or_email' };
     if (isObviousJunkToken(v)) return { ok:false, reason:'junk_token' };
 
-    // High-confidence mismatch rules only (minimise false positives)
     if (parent === 'people') {
       if (looksLikeCarEntry(v)) return { ok:false, reason:'looks_like_car_in_people' };
       return { ok:true, reason:'' };
@@ -1211,7 +1221,6 @@ function logEvent(event_name, meta = {}) {
       return { ok:true, reason:'' };
     }
 
-    // Everything else: allow by default (freedom-first).
     return { ok:true, reason:'' };
   }
 
@@ -1267,6 +1276,12 @@ function logEvent(event_name, meta = {}) {
     };
 
     setResultsCopy();
+
+    // QW3 — results_view
+    logEvent('results_view', {
+      category: (urlParams.get('category') || '').trim().toLowerCase() || null,
+      list_id: viewerListId
+    });
 
     const setResultsReflectionCopy = () => {
       const el = document.getElementById('resultsReflectionCopy');
@@ -1441,7 +1456,7 @@ function logEvent(event_name, meta = {}) {
      + Canonical-based diff update
      + Global diff baseline from:
         - localStorage snapshot if present
-        - otherwise Supabase existing row (prevents drift after storage clear)
+        - otherwise Supabase existing row
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1468,6 +1483,9 @@ function logEvent(event_name, meta = {}) {
         submitBtn.value = 'Saving...';
       }
 
+      // QW3 — submit_click
+      logEvent('submit_click', { category, list_id: viewerListId });
+
       const parent = getParentFromCategory(category);
       if (parent) setLastParent(parent);
 
@@ -1479,6 +1497,14 @@ function logEvent(event_name, meta = {}) {
 
       const verdict = validateTop5(newValues);
       if (!verdict.ok) {
+        // QW3 — submit_error (validation)
+        logEvent('submit_error', {
+          category,
+          list_id: viewerListId,
+          reason: 'validation',
+          message: verdict.msg
+        });
+
         alert(verdict.msg);
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1495,10 +1521,20 @@ function logEvent(event_name, meta = {}) {
           .eq('category', category)
           .maybeSingle();
 
+        const hadExisting = !!existingRow;
+        const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
+
         // No-change submit guard
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
+
+          // QW3 — submit_success (no-change)
+          logEvent('submit_success', {
+            category,
+            list_id: viewerListId,
+            changed: false
+          });
 
           window.location.href =
             window.location.origin +
@@ -1522,8 +1558,7 @@ function logEvent(event_name, meta = {}) {
 
         if (upErr) throw upErr;
 
-        // -------- Baseline selection (prevents drift)
-        // Prefer local snapshot, else fall back to existing Supabase row.
+        // Baseline selection (prevents drift)
         const appliedOld = loadGlobalApplied(category);
         const oldValuesForGlobal = appliedOld
           ? appliedOld
@@ -1533,10 +1568,29 @@ function logEvent(event_name, meta = {}) {
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
+        // QW3 — item_changed (only when a saved list actually changes)
+        if (changed) {
+          logEvent('item_changed', {
+            category,
+            list_id: viewerListId,
+            added: added.length,
+            removed: removed.length
+          });
+        }
+
         for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
         for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
 
         saveGlobalApplied(category, eligibleNew);
+
+        // QW3 — submit_success (changed)
+        logEvent('submit_success', {
+          category,
+          list_id: viewerListId,
+          changed: true,
+          added: added.length,
+          removed: removed.length
+        });
 
         window.location.href =
           window.location.origin +
@@ -1544,6 +1598,14 @@ function logEvent(event_name, meta = {}) {
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
+        // QW3 — submit_error (exception)
+        logEvent('submit_error', {
+          category,
+          list_id: viewerListId,
+          reason: 'exception',
+          message: String(err && (err.message || err) || 'unknown')
+        });
+
         alert(`Save failed: ${err.message || err}`);
         if (submitBtn) {
           submitBtn.disabled = false;
