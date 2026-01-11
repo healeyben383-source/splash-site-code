@@ -1,3 +1,4 @@
+// Archived reference snapshot — no functional change
 // SPLASH FOOTER JS — V23.9 (Analytics Locked + Link Clicks Fixed)
 // BASELINE: V23.8 (Analytics Locked)
 // Adds: link_clicks logging via REST keepalive (constraint-safe: source + link_slot)
