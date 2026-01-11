@@ -1,0 +1,143 @@
+<style>
+  .di-open-sheet{ position: fixed; inset: 0; z-index: 9999; display: none; }
+  .di-open-backdrop{ position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+  .di-open-panel{
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: 0;
+    width: min(520px, calc(100% - 28px));
+    background: #fff; border-radius: 18px 18px 0 0;
+    box-shadow: 0 20px 60px rgba(0,0,0,.25);
+    padding: 16px;
+  }
+  .di-open-head{ display:flex; align-items:center; justify-content:space-between; padding:4px 2px 10px; }
+  .di-open-title{ font-weight:700; font-size:14px; letter-spacing:.06em; text-transform:uppercase; color: rgba(0,0,0,.7); }
+  .di-open-x{ border:0; background:transparent; font-size:24px; line-height:1; padding:6px 10px; cursor:pointer; color: rgba(0,0,0,.55); }
+
+  .di-open-links{ display:grid; gap: 10px; margin: 6px 0 12px; }
+  .di-open-link{
+    display:flex; justify-content:center; align-items:center;
+    padding: 14px 12px; border-radius: 14px;
+    border: 1px solid rgba(0,0,0,.10);
+    text-decoration:none; font-weight:650;
+    color: rgba(0,0,0,.82);
+  }
+  .di-open-cancel{
+    width:100%; padding:12px; border-radius:14px;
+    border:1px solid rgba(0,0,0,.10);
+    background:#fff; cursor:pointer; color: rgba(0,0,0,.62);
+  }
+
+  @media (min-width: 768px){
+    .di-open-panel{ bottom:auto; top:50%; transform: translate(-50%,-50%); border-radius:18px; padding:18px; }
+  }
+
+  .di-open-link, .di-open-cancel, .di-open-title{
+    opacity:1 !important; visibility:visible !important;
+    -webkit-text-fill-color: rgba(0,0,0,.82) !important;
+    font-size: 16px !important; line-height:1.2 !important;
+  }
+  .di-open-title{
+    font-size:14px !important; letter-spacing:.06em !important;
+    text-transform:uppercase !important;
+    color: rgba(0,0,0,.7) !important;
+    -webkit-text-fill-color: rgba(0,0,0,.7) !important;
+  }
+</style>
+
+<div class="di-open-sheet" aria-hidden="true">
+  <div class="di-open-backdrop" data-di-close></div>
+
+  <div class="di-open-panel" role="dialog" aria-modal="true" aria-label="Open item">
+    <div class="di-open-head">
+      <div class="di-open-title">Open</div>
+      <button type="button" class="di-open-x" data-di-close aria-label="Close">×</button>
+    </div>
+
+    <div class="di-open-links">
+      <a class="di-open-link" data-di-slot="a" target="_blank" rel="noopener">Link A</a>
+      <a class="di-open-link" data-di-slot="b" target="_blank" rel="noopener">Link B</a>
+    </div>
+
+    <button type="button" class="di-open-cancel" data-di-close>Cancel</button>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.__SPLASH_OPEN_SHEET_V2__) return;
+  window.__SPLASH_OPEN_SHEET_V2__ = true;
+
+  const sheet = document.querySelector('.di-open-sheet');
+  if (!sheet) return;
+
+  const panel = sheet.querySelector('.di-open-panel');
+  const titleEl = sheet.querySelector('.di-open-title');
+  const linksWrap = sheet.querySelector('.di-open-links');
+  const linkA = sheet.querySelector('[data-di-slot="a"]');
+  const linkB = sheet.querySelector('[data-di-slot="b"]');
+
+  function showSheet(payload) {
+    const aLabel = payload.aLabel || '';
+    const aUrl   = payload.aUrl || '';
+    const bLabel = payload.bLabel || '';
+    const bUrl   = payload.bUrl || '';
+
+    if (titleEl) titleEl.textContent = 'Open';
+
+    // A
+    if (aUrl) {
+      linkA.href = aUrl;
+      linkA.textContent = aLabel || 'Open';
+      linkA.style.display = '';
+    } else {
+      linkA.removeAttribute('href');
+      linkA.style.display = 'none';
+    }
+
+    // B
+    if (bUrl) {
+      linkB.href = bUrl;
+      linkB.textContent = bLabel || 'Search';
+      linkB.style.display = '';
+    } else {
+      linkB.removeAttribute('href');
+      linkB.style.display = 'none';
+    }
+
+    const anyVisible = (linkA.style.display !== 'none') || (linkB.style.display !== 'none');
+    linksWrap.style.display = anyVisible ? '' : 'none';
+
+    sheet.style.display = 'block';
+    sheet.setAttribute('aria-hidden', 'false');
+    document.documentElement.style.overflow = 'hidden';
+  }
+
+  function hideSheet() {
+    sheet.style.display = 'none';
+    sheet.setAttribute('aria-hidden', 'true');
+    document.documentElement.style.overflow = '';
+  }
+
+  sheet.addEventListener('click', (e) => {
+    if (e.target.closest('[data-di-close]')) hideSheet();
+  });
+
+  if (panel) panel.addEventListener('click', (e) => e.stopPropagation());
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sheet.style.display === 'block') hideSheet();
+  });
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-di-open]');
+    if (!btn) return;
+
+    let raw = btn.getAttribute('data-di-links') || '{}';
+    raw = raw.replace(/'/g, '"');
+
+    let payload = {};
+    try { payload = JSON.parse(raw); } catch (err) { payload = {}; }
+
+    showSheet(payload);
+  });
+});
+</script>
