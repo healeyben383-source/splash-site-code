@@ -177,25 +177,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /* =========================
-     LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
-     Table: public.link_clicks
-     Constraints:
-       - link_slot must be 'A' or 'B'
-       - source must be 'user_top5' or 'global_top100'
-  ========================== */
- async function insertLinkClickKeepalive(row){
+/* =========================
+   LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+   Table: public.link_clicks
+   Constraints:
+     - link_slot must be 'A' or 'B'
+     - source must be 'user_top5' or 'global_top100'
+========================== */
+async function insertLinkClickKeepalive(row){
   try {
     const payload = {
       category: row.category || null,
       canonical_id: row.canonical_id || null,
       display_name: row.display_name || null,
+
+      // constraints
       link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
       link_label: row.link_label || null,
       source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
+
       page: row.page || (window.location.pathname || null),
       url: row.url || null,
-      list_id: row.list_id || null
+
+      // keep list_id clean (your analytics uses uuidOrNull too)
+      list_id: uuidOrNull(row.list_id),
+
+      // IMPORTANT: enables join to analytics_events
+      session_id: getSessionId()
     };
 
     // Hard guard against constraint failure
@@ -219,7 +227,6 @@ document.addEventListener('DOMContentLoaded', () => {
       keepalive: true
     });
 
-    // IMPORTANT: do not fail silently during diagnosis
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
@@ -231,6 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error('[Splash link_clicks] exception', e);
   }
 }
+
 
 
   /* =========================
