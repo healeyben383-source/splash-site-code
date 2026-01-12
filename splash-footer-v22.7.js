@@ -1701,6 +1701,49 @@ async function insertLinkClickKeepalive(row){
       );
 
       saveLastList(category, newValues);
+      // =========================
+      // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
+      // =========================
+      const errorTextEl = formEl.querySelector('.form-error-text');
+
+      // Hide helper
+      const hideFormError = () => {
+        if (!errorTextEl) return;
+        errorTextEl.style.display = 'none';
+        errorTextEl.setAttribute('aria-hidden', 'true');
+      };
+
+      // Show helper
+      const showFormError = (msg) => {
+        if (!errorTextEl) return;
+        errorTextEl.textContent = msg || 'Please enter all five before submitting.';
+        errorTextEl.style.display = 'block';
+        errorTextEl.setAttribute('aria-hidden', 'false');
+      };
+
+      // Always start hidden on submit attempt (prevents “sticky” error)
+      hideFormError();
+
+      const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
+
+      if (!allFiveFilled) {
+        // Optional analytics hook (keeps your QW3 style consistent)
+        logEvent('submit_error', {
+          category,
+          list_id: viewerListId,
+          reason: 'missing_required',
+          message: 'Not all five fields filled'
+        });
+
+        showFormError('Please enter all five before submitting.');
+
+        // Re-enable button + exit early (no alerts, no tooltips)
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.value = originalBtnValue || 'Submit';
+        }
+        return;
+      }
 
       const verdict = validateTop5(newValues);
       if (!verdict.ok) {
