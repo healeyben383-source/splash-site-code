@@ -1,10 +1,13 @@
 // Archived reference snapshot — no functional change
-// SPLASH FOOTER JS — V23.9 (Analytics Locked + Link Clicks Fixed)
-// BASELINE: V23.8 (Analytics Locked)
-// Adds: link_clicks logging via REST keepalive (constraint-safe: source + link_slot)
-// - link_slot forced to 'A'/'B' only
-// - source forced to 'user_top5'/'global_top100' only
-// - non-blocking (never prevents opening link)
+// SPLASH FOOTER JS — V24.0 (Beta Error Handling: Toast + Retry, No Alerts)
+// BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
+// Adds (beta-safe):
+//  - Fail-soft toast UI (non-blocking)
+//  - Inline form error helper (prefers .form-error-text over alerts)
+//  - Results page missing-category guard
+//  - Retry affordances for user list + global list load failures
+//  - ui_error analytics events (fail-silent) for load failures
+// NOTE: No refactors. Core logic unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -177,6 +180,117 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  /* =========================
+     BETA ERROR UI (FAIL-SOFT)
+     - Non-blocking toast + optional inline messages
+     - No alerts by default
+  ========================== */
+  function ensureToastHost(){
+    let host = document.getElementById('splash-toast-host');
+    if (host) return host;
+
+    host = document.createElement('div');
+    host.id = 'splash-toast-host';
+    host.style.position = 'fixed';
+    host.style.left = '12px';
+    host.style.right = '12px';
+    host.style.bottom = '12px';
+    host.style.zIndex = '99999';
+    host.style.display = 'flex';
+    host.style.flexDirection = 'column';
+    host.style.gap = '10px';
+    host.style.pointerEvents = 'none';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function toast(message, kind = 'error', ttl = 4200){
+    try {
+      const host = ensureToastHost();
+      const card = document.createElement('div');
+      card.setAttribute('role', 'status');
+      card.style.pointerEvents = 'auto';
+      card.style.padding = '12px 14px';
+      card.style.borderRadius = '12px';
+      card.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)';
+      card.style.backdropFilter = 'blur(8px)';
+      card.style.display = 'flex';
+      card.style.alignItems = 'center';
+      card.style.justifyContent = 'space-between';
+      card.style.gap = '12px';
+      card.style.fontSize = '14px';
+
+      // conservative colors (doesn't assume CSS tokens)
+      if (kind === 'success') {
+        card.style.background = 'rgba(20, 110, 60, 0.92)';
+        card.style.color = '#fff';
+      } else if (kind === 'info') {
+        card.style.background = 'rgba(20, 50, 90, 0.92)';
+        card.style.color = '#fff';
+      } else {
+        card.style.background = 'rgba(120, 35, 35, 0.92)';
+        card.style.color = '#fff';
+      }
+
+      const msg = document.createElement('div');
+      msg.textContent = String(message || 'Something went wrong.');
+      msg.style.flex = '1 1 auto';
+
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.style.border = 'none';
+      x.style.background = 'transparent';
+      x.style.color = 'inherit';
+      x.style.fontSize = '18px';
+      x.style.cursor = 'pointer';
+      x.addEventListener('click', () => card.remove());
+
+      card.appendChild(msg);
+      card.appendChild(x);
+
+      host.appendChild(card);
+
+      setTimeout(() => {
+        try { card.remove(); } catch(e) {}
+      }, ttl);
+    } catch(e) {
+      // fail-silent: never break UX
+    }
+  }
+
+  function setInlineError(formEl, msg){
+    try {
+      const errorTextEl = formEl && formEl.querySelector && formEl.querySelector('.form-error-text');
+      if (!errorTextEl) return false;
+
+      if (!msg) {
+        errorTextEl.style.display = 'none';
+        errorTextEl.setAttribute('aria-hidden', 'true');
+        return true;
+      }
+
+      errorTextEl.textContent = String(msg);
+      errorTextEl.style.display = 'block';
+      errorTextEl.setAttribute('aria-hidden', 'false');
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function reportLoadFailure(context, err){
+    try {
+      logEvent('ui_error', {
+        category: (urlParams.get('category') || '').trim().toLowerCase() || null,
+        list_id: viewerListId,
+        context,
+        message: String(err && (err.message || err) || 'unknown')
+      });
+    } catch(e) {}
+  }
+
 /* =========================
    LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
    Table: public.link_clicks
@@ -238,8 +352,6 @@ async function insertLinkClickKeepalive(row){
     console.error('[Splash link_clicks] exception', e);
   }
 }
-
-
 
   /* =========================
      PARENT ROUTES + LABELS
@@ -1462,6 +1574,19 @@ async function insertLinkClickKeepalive(row){
 
     setResultsCopy();
 
+    // Missing category guard (beta)
+    const __cat = (urlParams.get('category') || '').trim();
+    if (!__cat) {
+      toast('Missing category. Please go back and choose a category again.', 'error', 6500);
+
+      const userList = document.getElementById('userList');
+      const globalMount = document.getElementById('globalList');
+
+      if (userList) userList.innerHTML = '<li>No category selected.</li>';
+      if (globalMount) globalMount.textContent = 'No category selected.';
+      return;
+    }
+
     // QW3 — results_view
     logEvent('results_view', {
       category: (urlParams.get('category') || '').trim().toLowerCase() || null,
@@ -1527,7 +1652,7 @@ async function insertLinkClickKeepalive(row){
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // NEW: meta for link_clicks (source + slot constraints)
+            // meta for link_clicks
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1555,8 +1680,24 @@ async function insertLinkClickKeepalive(row){
           window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
           window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
         }
-      } catch {
-        userList.innerHTML = '<li>Could not load.</li>';
+      } catch (err) {
+        reportLoadFailure('user_list_load', err);
+
+        userList.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Could not load your list. ';
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = 'Retry';
+        retry.style.marginLeft = '8px';
+        retry.style.cursor = 'pointer';
+        retry.addEventListener('click', () => window.location.reload());
+
+        li.appendChild(retry);
+        userList.appendChild(li);
+
+        toast('Could not load your saved list.', 'error');
       }
     })();
 
@@ -1627,7 +1768,7 @@ async function insertLinkClickKeepalive(row){
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // NEW: meta for link_clicks (source + slot constraints)
+          // meta for link_clicks
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1651,8 +1792,24 @@ async function insertLinkClickKeepalive(row){
         globalMount.textContent = '';
         globalMount.appendChild(ul);
       } catch (err) {
-        globalMount.textContent = 'Could not load global rankings.';
+        reportLoadFailure('global_list_load', err);
         console.error('[Splash] Global list load failed:', err);
+
+        globalMount.textContent = '';
+        const wrap = document.createElement('div');
+        wrap.textContent = 'Could not load global rankings. ';
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = 'Retry';
+        retry.style.marginLeft = '8px';
+        retry.style.cursor = 'pointer';
+        retry.addEventListener('click', () => window.location.reload());
+
+        wrap.appendChild(retry);
+        globalMount.appendChild(wrap);
+
+        toast('Could not load Global Splash (Top 100).', 'error');
       }
     })();
   }
@@ -1690,6 +1847,9 @@ async function insertLinkClickKeepalive(row){
         submitBtn.value = 'Saving...';
       }
 
+      // clear any previous inline error on each attempt
+      setInlineError(formEl, null);
+
       // QW3 — submit_click
       logEvent('submit_click', { category, list_id: viewerListId });
 
@@ -1701,33 +1861,13 @@ async function insertLinkClickKeepalive(row){
       );
 
       saveLastList(category, newValues);
+
       // =========================
       // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
       // =========================
-      const errorTextEl = formEl.querySelector('.form-error-text');
-
-      // Hide helper
-      const hideFormError = () => {
-        if (!errorTextEl) return;
-        errorTextEl.style.display = 'none';
-        errorTextEl.setAttribute('aria-hidden', 'true');
-      };
-
-      // Show helper
-      const showFormError = (msg) => {
-        if (!errorTextEl) return;
-        errorTextEl.textContent = msg || 'Please enter all five before submitting.';
-        errorTextEl.style.display = 'block';
-        errorTextEl.setAttribute('aria-hidden', 'false');
-      };
-
-      // Always start hidden on submit attempt (prevents “sticky” error)
-      hideFormError();
-
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
 
       if (!allFiveFilled) {
-        // Optional analytics hook (keeps your QW3 style consistent)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1735,9 +1875,8 @@ async function insertLinkClickKeepalive(row){
           message: 'Not all five fields filled'
         });
 
-        showFormError('Please enter all five before submitting.');
+        setInlineError(formEl, 'Please enter all five before submitting.');
 
-        // Re-enable button + exit early (no alerts, no tooltips)
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
@@ -1747,7 +1886,6 @@ async function insertLinkClickKeepalive(row){
 
       const verdict = validateTop5(newValues);
       if (!verdict.ok) {
-        // QW3 — submit_error (validation)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1755,7 +1893,9 @@ async function insertLinkClickKeepalive(row){
           message: verdict.msg
         });
 
-        alert(verdict.msg);
+        // Prefer inline error; fall back to toast
+        if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
+
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
@@ -1779,7 +1919,6 @@ async function insertLinkClickKeepalive(row){
           const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
 
-          // QW3 — submit_success (no-change)
           logEvent('submit_success', {
             category,
             list_id: viewerListId,
@@ -1818,7 +1957,7 @@ async function insertLinkClickKeepalive(row){
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
-        // QW3 — item_changed (only when a saved list actually changes)
+        // item_changed only when a saved list actually changes
         if (changed) {
           logEvent('item_changed', {
             category,
@@ -1833,7 +1972,6 @@ async function insertLinkClickKeepalive(row){
 
         saveGlobalApplied(category, eligibleNew);
 
-        // QW3 — submit_success (changed)
         logEvent('submit_success', {
           category,
           list_id: viewerListId,
@@ -1848,7 +1986,6 @@ async function insertLinkClickKeepalive(row){
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
-        // QW3 — submit_error (exception)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1856,7 +1993,9 @@ async function insertLinkClickKeepalive(row){
           message: String(err && (err.message || err) || 'unknown')
         });
 
-        alert(`Save failed: ${err.message || err}`);
+        const m = 'Save failed. Please try again.';
+        if (!setInlineError(formEl, m)) toast(m, 'error');
+
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
