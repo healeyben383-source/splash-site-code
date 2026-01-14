@@ -1,13 +1,11 @@
-// Archived reference snapshot — no functional change
-// SPLASH FOOTER JS — V24.0 (Beta Error Handling: Toast + Retry, No Alerts)
+// SPLASH FOOTER JS — V24.0 (Beta: Remove MusicBrainz + Add Placeholders All Categories)
 // BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
-// Adds (beta-safe):
-//  - Fail-soft toast UI (non-blocking)
-//  - Inline form error helper (prefers .form-error-text over alerts)
-//  - Results page missing-category guard
-//  - Retry affordances for user list + global list load failures
-//  - ui_error analytics events (fail-silent) for load failures
-// NOTE: No refactors. Core logic unchanged.
+// Changes:
+// 1) MusicBrainz predictive suggestions DISABLED (no overlays / no third-party dependency in beta)
+// 2) Placeholder examples applied to ALL categories (format guidance without UX friction)
+// Notes:
+// - Does NOT override prefilled values (splash-prefilled) or any existing typed values
+// - Keeps all existing analytics, link_clicks, global list logic intact
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -181,177 +179,66 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     BETA ERROR UI (FAIL-SOFT)
-     - Non-blocking toast + optional inline messages
-     - No alerts by default
+     LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+     Table: public.link_clicks
+     Constraints:
+       - link_slot must be 'A' or 'B'
+       - source must be 'user_top5' or 'global_top100'
   ========================== */
-  function ensureToastHost(){
-    let host = document.getElementById('splash-toast-host');
-    if (host) return host;
-
-    host = document.createElement('div');
-    host.id = 'splash-toast-host';
-    host.style.position = 'fixed';
-    host.style.left = '12px';
-    host.style.right = '12px';
-    host.style.bottom = '12px';
-    host.style.zIndex = '99999';
-    host.style.display = 'flex';
-    host.style.flexDirection = 'column';
-    host.style.gap = '10px';
-    host.style.pointerEvents = 'none';
-    document.body.appendChild(host);
-    return host;
-  }
-
-  function toast(message, kind = 'error', ttl = 4200){
+  async function insertLinkClickKeepalive(row){
     try {
-      const host = ensureToastHost();
-      const card = document.createElement('div');
-      card.setAttribute('role', 'status');
-      card.style.pointerEvents = 'auto';
-      card.style.padding = '12px 14px';
-      card.style.borderRadius = '12px';
-      card.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)';
-      card.style.backdropFilter = 'blur(8px)';
-      card.style.display = 'flex';
-      card.style.alignItems = 'center';
-      card.style.justifyContent = 'space-between';
-      card.style.gap = '12px';
-      card.style.fontSize = '14px';
+      const payload = {
+        category: row.category || null,
+        canonical_id: row.canonical_id || null,
+        display_name: row.display_name || null,
 
-      // conservative colors (doesn't assume CSS tokens)
-      if (kind === 'success') {
-        card.style.background = 'rgba(20, 110, 60, 0.92)';
-        card.style.color = '#fff';
-      } else if (kind === 'info') {
-        card.style.background = 'rgba(20, 50, 90, 0.92)';
-        card.style.color = '#fff';
-      } else {
-        card.style.background = 'rgba(120, 35, 35, 0.92)';
-        card.style.color = '#fff';
-      }
+        // constraints
+        link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
+        link_label: row.link_label || null,
+        source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
 
-      const msg = document.createElement('div');
-      msg.textContent = String(message || 'Something went wrong.');
-      msg.style.flex = '1 1 auto';
+        page: row.page || (window.location.pathname || null),
+        url: row.url || null,
 
-      const x = document.createElement('button');
-      x.type = 'button';
-      x.textContent = '×';
-      x.setAttribute('aria-label', 'Dismiss');
-      x.style.border = 'none';
-      x.style.background = 'transparent';
-      x.style.color = 'inherit';
-      x.style.fontSize = '18px';
-      x.style.cursor = 'pointer';
-      x.addEventListener('click', () => card.remove());
+        // keep list_id clean (your analytics uses uuidOrNull too)
+        list_id: uuidOrNull(row.list_id),
 
-      card.appendChild(msg);
-      card.appendChild(x);
+        // IMPORTANT: enables join to analytics_events
+        session_id: getSessionId()
+      };
 
-      host.appendChild(card);
+      // Hard guard against constraint failure
+      if (!payload.category) return;
+      if (!payload.link_slot) return;
+      if (!payload.link_label) return;
+      if (!payload.source) return;
+      if (!payload.url) return;
 
-      setTimeout(() => {
-        try { card.remove(); } catch(e) {}
-      }, ttl);
-    } catch(e) {
-      // fail-silent: never break UX
-    }
-  }
+      const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
 
-  function setInlineError(formEl, msg){
-    try {
-      const errorTextEl = formEl && formEl.querySelector && formEl.querySelector('.form-error-text');
-      if (!errorTextEl) return false;
-
-      if (!msg) {
-        errorTextEl.style.display = 'none';
-        errorTextEl.setAttribute('aria-hidden', 'true');
-        return true;
-      }
-
-      errorTextEl.textContent = String(msg);
-      errorTextEl.style.display = 'block';
-      errorTextEl.setAttribute('aria-hidden', 'false');
-      return true;
-    } catch(e) {
-      return false;
-    }
-  }
-
-  function reportLoadFailure(context, err){
-    try {
-      logEvent('ui_error', {
-        category: (urlParams.get('category') || '').trim().toLowerCase() || null,
-        list_id: viewerListId,
-        context,
-        message: String(err && (err.message || err) || 'unknown')
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_PUBLISHABLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(payload),
+        keepalive: true
       });
-    } catch(e) {}
-  }
 
-/* =========================
-   LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
-   Table: public.link_clicks
-   Constraints:
-     - link_slot must be 'A' or 'B'
-     - source must be 'user_top5' or 'global_top100'
-========================== */
-async function insertLinkClickKeepalive(row){
-  try {
-    const payload = {
-      category: row.category || null,
-      canonical_id: row.canonical_id || null,
-      display_name: row.display_name || null,
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
+      } else {
+        console.log('[Splash link_clicks] inserted', payload);
+      }
 
-      // constraints
-      link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
-      link_label: row.link_label || null,
-      source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
-
-      page: row.page || (window.location.pathname || null),
-      url: row.url || null,
-
-      // keep list_id clean (your analytics uses uuidOrNull too)
-      list_id: uuidOrNull(row.list_id),
-
-      // IMPORTANT: enables join to analytics_events
-      session_id: getSessionId()
-    };
-
-    // Hard guard against constraint failure
-    if (!payload.category) return;
-    if (!payload.link_slot) return;
-    if (!payload.link_label) return;
-    if (!payload.source) return;
-    if (!payload.url) return;
-
-    const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
-
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_PUBLISHABLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify(payload),
-      keepalive: true
-    });
-
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
-    } else {
-      console.log('[Splash link_clicks] inserted', payload);
+    } catch (e) {
+      console.error('[Splash link_clicks] exception', e);
     }
-
-  } catch (e) {
-    console.error('[Splash link_clicks] exception', e);
   }
-}
 
   /* =========================
      PARENT ROUTES + LABELS
@@ -704,200 +591,65 @@ async function insertLinkClickKeepalive(row){
   })();
 
   /* =========================
-     MUSICBRAINZ PREDICT (Albums only)
+     MUSICBRAINZ PREDICT — DISABLED FOR BETA
+     (kept as a stub for future re-enable)
   ========================== */
-  function debounce(fn, wait) {
-    let t = null;
-    return function(...args) {
-      clearTimeout(t);
-      t = setTimeout(() => fn.apply(this, args), wait);
-    };
-  }
-
-  function ensureSuggestBox(inputEl) {
-    if (!inputEl || inputEl.__SPLASH_SUGGEST_BOX__) return inputEl.__SPLASH_SUGGEST_BOX__;
-
-    const box = document.createElement('div');
-    box.className = 'splash-suggest';
-    box.setAttribute('role', 'listbox');
-    box.dataset.open = '0';
-    box.__activeIndex = -1;
-    box.__items = [];
-
-    const parent = inputEl.parentElement;
-    if (parent) {
-      const cs = window.getComputedStyle(parent);
-      if (cs.position === 'static') parent.style.position = 'relative';
-      parent.appendChild(box);
-    } else {
-      document.body.appendChild(box);
-    }
-
-    inputEl.__SPLASH_SUGGEST_BOX__ = box;
-    return box;
-  }
-
-  function closeSuggest(inputEl) {
-    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
-    if (!box) return;
-    box.dataset.open = '0';
-    box.innerHTML = '';
-    box.__items = [];
-    box.__activeIndex = -1;
-  }
-
-  function setActiveRow(inputEl, index) {
-    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
-    if (!box || !box.__items.length) return;
-
-    const rows = Array.from(box.querySelectorAll('.row'));
-    rows.forEach(r => r.dataset.active = '0');
-
-    const bounded = Math.max(0, Math.min(index, rows.length - 1));
-    box.__activeIndex = bounded;
-    if (rows[bounded]) rows[bounded].dataset.active = '1';
-  }
-
-  function acceptSuggestion(inputEl, item) {
-    if (!inputEl || !item) return;
-    inputEl.value = item.display || item.label || '';
-    inputEl.dataset.canonicalId = item.id || '';
-    inputEl.dataset.canonicalSource = item.source || '';
-  }
-
-  function renderSuggest(inputEl, items) {
-    const box = ensureSuggestBox(inputEl);
-    box.innerHTML = '';
-    box.__items = items || [];
-    box.__activeIndex = -1;
-
-    if (!items || !items.length) {
-      box.dataset.open = '0';
-      return;
-    }
-
-    items.slice(0, 6).forEach((it, idx) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.index = String(idx);
-
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = it.label || '';
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = it.meta || '';
-
-      row.appendChild(title);
-      row.appendChild(meta);
-
-      row.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        acceptSuggestion(inputEl, it);
-        closeSuggest(inputEl);
-      });
-
-      box.appendChild(row);
-    });
-
-    box.dataset.open = '1';
-  }
-
-  async function musicBrainzAlbumSearch(query) {
-    const q = String(query || '').trim();
-    if (q.length < 2) return [];
-
-    const dashParts = q.split(/\s[-–—]\s/);
-    let title = (dashParts[0] || '').trim();
-    let artist = (dashParts.slice(1).join(' - ') || '').trim();
-
-    const strict = artist
-      ? `releasegroup:"${title}" AND artist:"${artist}"`
-      : `releasegroup:"${title}"`;
-
-    const loose = artist
-      ? `releasegroup:${title} AND artist:${artist}`
-      : `releasegroup:${title}`;
-
-    const fetchRG = async (mbq) => {
-      const url = `https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(mbq)}&fmt=json&limit=12`;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4500);
-
-      try {
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
-        if (!res.ok) return [];
-        const json = await res.json();
-        const rgs = (json && json['release-groups']) ? json['release-groups'] : [];
-        return Array.isArray(rgs) ? rgs : [];
-      } catch {
-        return [];
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-
-    let rgs = await fetchRG(strict);
-    if (!rgs.length) rgs = await fetchRG(loose);
-
-    const rgArtistName = (rg) => {
-      const ac = rg && rg['artist-credit'];
-      if (!ac || !ac.length) return '';
-      return String(ac[0].name || '');
-    };
-
-    return rgs
-      .filter(rg => rg && rg.id && rg.title)
-      .map(rg => {
-        const primaryArtist = rgArtistName(rg);
-        const year = rg['first-release-date'] ? String(rg['first-release-date']).slice(0,4) : '';
-        const meta = [primaryArtist, year].filter(Boolean).join(' • ');
-        const display = primaryArtist ? `${rg.title} - ${primaryArtist}` : rg.title;
-
-        return { id: rg.id, source: 'musicbrainz', label: rg.title, display, meta };
-      })
-      .slice(0, 6);
-  }
-
   function bindPredictToInput(inputEl, category) {
-    if (!inputEl || inputEl.__SPLASH_MB_PREDICT__) return;
-    inputEl.__SPLASH_MB_PREDICT__ = true;
+    // Disabled for beta: replaced by placeholders (no overlays / no third-party dependency)
+    return;
+  }
 
-    ensureSuggestBox(inputEl);
+  /* =========================
+     BETA INPUT EXAMPLES (ALL CATEGORIES)
+     - Applies placeholders without overriding values or prefilled state
+  ========================== */
+  const PLACEHOLDER_EXAMPLES = {
+    // Music subcategories
+    'music-albums':   'The Wall - Pink Floyd',
+    'music-songs':    'Back in Black - AC/DC',
+    'music-artists':  'Pink Floyd',
+    'music-genres':   'Classic Rock',
 
-    const doSearch = debounce(async () => {
-      if (inputEl.dataset.splashPrefilled === '1') return;
-      const v = String(inputEl.value || '').trim();
-      if (v.length < 3) { closeSuggest(inputEl); return; }
-      if (!isAlbumsCategory(category)) return;
+    // Parent categories (fallbacks)
+    'music':          'The Wall - Pink Floyd',
+    'movies':         'Heat (1995)',
+    'tv':             'Breaking Bad',
+    'books':          'The Shining - Stephen King',
+    'cars':           '1998 Toyota Supra',
+    'games':          'The Legend of Zelda: Ocarina of Time',
+    'travel':         'Kyoto, Japan',
+    'food':           'Neapolitan pizza',
+    'people':         'David Bowie',
+    'wildcard':       'My old Fender Stratocaster'
+  };
 
-      const items = await musicBrainzAlbumSearch(v);
-      renderSuggest(inputEl, items);
-    }, 180);
+  function applyPlaceholders(formEl, category) {
+    if (!formEl || !category) return;
 
-    inputEl.addEventListener('input', doSearch);
+    const parent = getParentFromCategory(category);
+    const example =
+      PLACEHOLDER_EXAMPLES[category] ||
+      PLACEHOLDER_EXAMPLES[parent] ||
+      'Enter your choice';
 
-    inputEl.addEventListener('keydown', (e) => {
-      const box = inputEl.__SPLASH_SUGGEST_BOX__;
-      const open = box && box.dataset.open === '1';
-      if (!open) return;
+    const inputs = getRankInputs(formEl);
+    if (!inputs.length) return;
 
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex + 1)); return; }
-      if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex - 1)); return; }
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        if (box.__activeIndex >= 0 && box.__items[box.__activeIndex]) {
-          e.preventDefault();
-          acceptSuggestion(inputEl, box.__items[box.__activeIndex]);
-          closeSuggest(inputEl);
-        }
-        return;
-      }
-      if (e.key === 'Escape') { e.preventDefault(); closeSuggest(inputEl); return; }
+    inputs.forEach((input, idx) => {
+      if (!input) return;
+
+      // Do not override any existing value
+      if (String(input.value || '').trim()) return;
+
+      // Do not override prefilled state
+      if (input.dataset.splashPrefilled === '1') return;
+
+      // Do not override a placeholder already set in Webflow (unless you want to)
+      // If you DO want to override, remove this guard.
+      if (String(input.placeholder || '').trim()) return;
+
+      input.placeholder = (idx === 0) ? example : 'Add another…';
     });
-
-    inputEl.addEventListener('blur', () => { setTimeout(() => closeSuggest(inputEl), 120); });
   }
 
   /* =========================
@@ -1574,19 +1326,6 @@ async function insertLinkClickKeepalive(row){
 
     setResultsCopy();
 
-    // Missing category guard (beta)
-    const __cat = (urlParams.get('category') || '').trim();
-    if (!__cat) {
-      toast('Missing category. Please go back and choose a category again.', 'error', 6500);
-
-      const userList = document.getElementById('userList');
-      const globalMount = document.getElementById('globalList');
-
-      if (userList) userList.innerHTML = '<li>No category selected.</li>';
-      if (globalMount) globalMount.textContent = 'No category selected.';
-      return;
-    }
-
     // QW3 — results_view
     logEvent('results_view', {
       category: (urlParams.get('category') || '').trim().toLowerCase() || null,
@@ -1652,7 +1391,7 @@ async function insertLinkClickKeepalive(row){
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // meta for link_clicks
+            // meta for link_clicks (source + slot constraints)
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1680,24 +1419,8 @@ async function insertLinkClickKeepalive(row){
           window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
           window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
         }
-      } catch (err) {
-        reportLoadFailure('user_list_load', err);
-
-        userList.innerHTML = '';
-        const li = document.createElement('li');
-        li.textContent = 'Could not load your list. ';
-
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.textContent = 'Retry';
-        retry.style.marginLeft = '8px';
-        retry.style.cursor = 'pointer';
-        retry.addEventListener('click', () => window.location.reload());
-
-        li.appendChild(retry);
-        userList.appendChild(li);
-
-        toast('Could not load your saved list.', 'error');
+      } catch {
+        userList.innerHTML = '<li>Could not load.</li>';
       }
     })();
 
@@ -1768,7 +1491,7 @@ async function insertLinkClickKeepalive(row){
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // meta for link_clicks
+          // meta for link_clicks (source + slot constraints)
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1792,31 +1515,15 @@ async function insertLinkClickKeepalive(row){
         globalMount.textContent = '';
         globalMount.appendChild(ul);
       } catch (err) {
-        reportLoadFailure('global_list_load', err);
+        globalMount.textContent = 'Could not load global rankings.';
         console.error('[Splash] Global list load failed:', err);
-
-        globalMount.textContent = '';
-        const wrap = document.createElement('div');
-        wrap.textContent = 'Could not load global rankings. ';
-
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.textContent = 'Retry';
-        retry.style.marginLeft = '8px';
-        retry.style.cursor = 'pointer';
-        retry.addEventListener('click', () => window.location.reload());
-
-        wrap.appendChild(retry);
-        globalMount.appendChild(wrap);
-
-        toast('Could not load Global Splash (Top 100).', 'error');
       }
     })();
   }
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Predict bind for Music Albums
+     + Placeholder examples (ALL categories)
      + Canonical-based diff update
      + Global diff baseline from:
         - localStorage snapshot if present
@@ -1829,12 +1536,13 @@ async function insertLinkClickKeepalive(row){
 
     applyLastListToForm(formEl);
 
-    if (isAlbumsCategory(category)) {
-      getRankInputs(formEl).forEach(inp => {
-        enablePrefilledBehavior(inp);
-        bindPredictToInput(inp, category);
-      });
-    }
+    // NEW: placeholder guidance for all categories
+    applyPlaceholders(formEl, category);
+
+    // Keep prefill behavior bound
+    getRankInputs(formEl).forEach(enablePrefilledBehavior);
+
+    // (MusicBrainz predict disabled for beta; no binding here)
 
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1846,9 +1554,6 @@ async function insertLinkClickKeepalive(row){
         submitBtn.disabled = true;
         submitBtn.value = 'Saving...';
       }
-
-      // clear any previous inline error on each attempt
-      setInlineError(formEl, null);
 
       // QW3 — submit_click
       logEvent('submit_click', { category, list_id: viewerListId });
@@ -1865,6 +1570,26 @@ async function insertLinkClickKeepalive(row){
       // =========================
       // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
       // =========================
+      const errorTextEl = formEl.querySelector('.form-error-text');
+
+      // Hide helper
+      const hideFormError = () => {
+        if (!errorTextEl) return;
+        errorTextEl.style.display = 'none';
+        errorTextEl.setAttribute('aria-hidden', 'true');
+      };
+
+      // Show helper
+      const showFormError = (msg) => {
+        if (!errorTextEl) return;
+        errorTextEl.textContent = msg || 'Please enter all five before submitting.';
+        errorTextEl.style.display = 'block';
+        errorTextEl.setAttribute('aria-hidden', 'false');
+      };
+
+      // Always start hidden on submit attempt (prevents “sticky” error)
+      hideFormError();
+
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
 
       if (!allFiveFilled) {
@@ -1875,7 +1600,7 @@ async function insertLinkClickKeepalive(row){
           message: 'Not all five fields filled'
         });
 
-        setInlineError(formEl, 'Please enter all five before submitting.');
+        showFormError('Please enter all five before submitting.');
 
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1893,9 +1618,7 @@ async function insertLinkClickKeepalive(row){
           message: verdict.msg
         });
 
-        // Prefer inline error; fall back to toast
-        if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
-
+        alert(verdict.msg);
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
@@ -1957,7 +1680,7 @@ async function insertLinkClickKeepalive(row){
 
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
-        // item_changed only when a saved list actually changes
+        // QW3 — item_changed (only when a saved list actually changes)
         if (changed) {
           logEvent('item_changed', {
             category,
@@ -1993,9 +1716,7 @@ async function insertLinkClickKeepalive(row){
           message: String(err && (err.message || err) || 'unknown')
         });
 
-        const m = 'Save failed. Please try again.';
-        if (!setInlineError(formEl, m)) toast(m, 'error');
-
+        alert(`Save failed: ${err.message || err}`);
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
