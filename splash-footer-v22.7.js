@@ -1,9 +1,9 @@
 // Archived reference snapshot — updated
-// SPLASH FOOTER JS — V24.0 (Webflow Submit Suppress + Example Placeholders)
-// BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
+// SPLASH FOOTER JS — V24.1 (Overlay Hard-Kill + Placeholder Reapply)
+// BASELINE: V24.0 (Webflow Submit Suppress + Example Placeholders)
 // Adds:
-// 1) Suppress Webflow native form handler (prevents "Save failed. Please try again." toast)
-// 2) Apply example placeholder text across ALL categories (no value overrides)
+// 1) Force-close any stuck overlays/backdrops on load (fixes iOS "dimmed + unclickable" issue)
+// 2) Re-apply example placeholders after Webflow pass + on focus (placeholders now reliably show)
 // Notes: No functional change to Supabase writes, analytics, link_clicks, global list, or anti-junk logic.
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -469,9 +469,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     NEW — EXAMPLE PLACEHOLDERS (ALL CATEGORIES)
+     EXAMPLE PLACEHOLDERS (ALL CATEGORIES)
      - Does NOT override non-generic placeholders
      - Does NOT override existing values
+     - Re-applies after Webflow pass + on focus
   ========================== */
   function examplePlaceholderForCategory(category){
     const parent = getParentFromCategory(category);
@@ -501,15 +502,30 @@ document.addEventListener('DOMContentLoaded', () => {
       const example = examplePlaceholderForCategory(category);
       const inputs = getRankInputs(formEl);
 
+      const isGeneric = (ph) => {
+        const p = String(ph || '').trim();
+        if (!p) return true;
+
+        // "Song 1", "Artist 4", "Item 5", etc.
+        if (/^[A-Za-z]+\s\d+$/.test(p)) return true;
+        if (/^(song|album|artist|item|rank)\s\d+$/i.test(p)) return true;
+
+        return false;
+      };
+
       inputs.forEach((inp) => {
-        const ph = String(inp.getAttribute('placeholder') || '').trim();
-
-        // Consider placeholders like "Song 1", "Album 3", "Item 5" as generic.
-        const isGeneric = (/^\S+\s\d+$/.test(ph) || ph === '');
-
-        // Do not override custom placeholders someone already set in Webflow.
-        if (isGeneric) {
+        const ph = inp.getAttribute('placeholder') || '';
+        if (isGeneric(ph)) {
           inp.setAttribute('placeholder', example);
+        }
+
+        // If Webflow rewrites later, fix again on focus
+        if (!inp.__SPLASH_PH_FIX__) {
+          inp.__SPLASH_PH_FIX__ = true;
+          inp.addEventListener('focus', () => {
+            const ph2 = inp.getAttribute('placeholder') || '';
+            if (isGeneric(ph2)) inp.setAttribute('placeholder', example);
+          }, { passive: true });
         }
       });
     } catch(e){}
@@ -606,9 +622,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      MUSICBRAINZ PREDICT (Albums only)
-     NOTE: Your prior change to stop it interfering would be applied here in your repo.
-     This file keeps your existing structure. If you removed/disabled suggestions earlier,
-     leave that version in place in your repo before committing.
   ========================== */
   function debounce(fn, wait) {
     let t = null;
@@ -963,6 +976,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sheet = document.createElement('div');
     sheet.className = 'di-open-sheet';
     sheet.setAttribute('aria-hidden','true');
+    sheet.style.display = 'none'; // IMPORTANT: never start open (prevents stuck overlay on iOS)
 
     sheet.innerHTML = `
       <div class="di-open-backdrop"></div>
@@ -1104,6 +1118,25 @@ document.addEventListener('DOMContentLoaded', () => {
     sheet.setAttribute('aria-hidden', 'true');
     unlockScroll();
   }
+
+  // HARD KILL any stuck overlays on load (prevents dimmed / unclickable screen on iOS)
+  (function forceCloseOverlaysOnLoad(){
+    try {
+      // Ensure scroll is restored no matter what
+      unlockScroll();
+
+      const sheet = document.querySelector('.di-open-sheet');
+      if (sheet) {
+        sheet.style.display = 'none';
+        sheet.setAttribute('aria-hidden', 'true');
+      }
+
+      // Also defensively clear any lingering overflow locks
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      document.body.style.touchAction = '';
+    } catch(e) {}
+  })();
 
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
@@ -1665,9 +1698,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     NEW — WEBFLOW FORM UI SUPPRESSION
-     - Prevents native Webflow toast ("Save failed. Please try again.")
-     - Hides .w-form-done and .w-form-fail blocks if present
+     WEBFLOW FORM UI SUPPRESSION
   ========================== */
   function hideWebflowFormMessages(formEl){
     try {
@@ -1682,13 +1713,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Predict bind for Music Albums
-     + Canonical-based diff update
-     + Global diff baseline from:
-        - localStorage snapshot if present
-        - otherwise Supabase existing row
-     + NEW: blocks Webflow submit handler
-     + NEW: placeholders across all categories
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1698,6 +1722,10 @@ document.addEventListener('DOMContentLoaded', () => {
     applyLastListToForm(formEl);
     applyExamplePlaceholders(formEl, category);
     hideWebflowFormMessages(formEl);
+
+    // Re-apply placeholders after Webflow finishes its own pass
+    setTimeout(() => applyExamplePlaceholders(formEl, category), 300);
+    setTimeout(() => applyExamplePlaceholders(formEl, category), 1200);
 
     if (isAlbumsCategory(category)) {
       getRankInputs(formEl).forEach(inp => {
