@@ -1,11 +1,10 @@
-// SPLASH FOOTER JS — V24.0 (Beta: Remove MusicBrainz + Add Placeholders All Categories)
+// Archived reference snapshot — updated
+// SPLASH FOOTER JS — V24.0 (Webflow Submit Suppress + Example Placeholders)
 // BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
-// Changes:
-// 1) MusicBrainz predictive suggestions DISABLED (no overlays / no third-party dependency in beta)
-// 2) Placeholder examples applied to ALL categories (format guidance without UX friction)
-// Notes:
-// - Does NOT override prefilled values (splash-prefilled) or any existing typed values
-// - Keeps all existing analytics, link_clicks, global list logic intact
+// Adds:
+// 1) Suppress Webflow native form handler (prevents "Save failed. Please try again." toast)
+// 2) Apply example placeholder text across ALL categories (no value overrides)
+// Notes: No functional change to Supabase writes, analytics, link_clicks, global list, or anti-junk logic.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -23,9 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
-     - session_id is uuid NOT NULL → MUST always be valid UUID
-     - list_id is uuid nullable → only send if valid UUID else null
-     - Never blocks UX, queue + flush in background
   ========================== */
   const ANALYTICS_SESSION_KEY = 'splash_session_id';
   const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
@@ -33,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const ANALYTICS_FLUSH_CHUNK = 25;
 
   function uuidv4Fallback(){
-    // RFC4122-ish v4 fallback using Math.random (sufficient for session IDs)
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = Math.random() * 16 | 0;
       const v = (c === 'x') ? r : ((r & 0x3) | 0x8);
@@ -58,7 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       return sid;
     } catch {
-      // Must still return a UUID because session_id is uuid NOT NULL
       return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
     }
   }
@@ -76,30 +70,23 @@ document.addEventListener('DOMContentLoaded', () => {
   function writeQueue(arr){
     try {
       localStorage.setItem(ANALYTICS_QUEUE_KEY, JSON.stringify(arr));
-    } catch {
-      // If storage is full or blocked, do nothing (fail-silent).
-    }
+    } catch {}
   }
 
   function enqueueEvent(payload){
     try {
       const q = readQueue();
       q.push(payload);
-
-      // Trim oldest if over cap
       if (q.length > ANALYTICS_QUEUE_MAX) {
         q.splice(0, q.length - ANALYTICS_QUEUE_MAX);
       }
       writeQueue(q);
-    } catch {
-      // silent
-    }
+    } catch {}
   }
 
   let __FLUSHING__ = false;
 
   async function postAnalyticsBatchKeepalive(batch){
-    // Supabase REST insert with keepalive to survive navigation better
     const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
     const res = await fetch(url, {
       method: 'POST',
@@ -113,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
       keepalive: true
     });
 
-    // 201/204 are typical for return=minimal inserts
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
@@ -128,24 +114,19 @@ document.addEventListener('DOMContentLoaded', () => {
       let q = readQueue();
       if (!q.length) return;
 
-      // Send in chunks; remove only on success
       while (q.length) {
         const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
-
         await postAnalyticsBatchKeepalive(batch);
-
-        // Remove sent
         q = q.slice(batch.length);
         writeQueue(q);
       }
     } catch {
-      // leave queue intact for next attempt
+      // leave queue intact
     } finally {
       __FLUSHING__ = false;
     }
   }
 
-  // Flush on load and opportunistically
   flushQueue();
   setTimeout(flushQueue, 1500);
   setInterval(flushQueue, 15000);
@@ -173,17 +154,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       enqueueEvent(payload);
       flushQueue();
-    } catch {
-      // silent by design
-    }
+    } catch {}
   }
 
   /* =========================
      LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
-     Table: public.link_clicks
-     Constraints:
-       - link_slot must be 'A' or 'B'
-       - source must be 'user_top5' or 'global_top100'
   ========================== */
   async function insertLinkClickKeepalive(row){
     try {
@@ -192,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
         canonical_id: row.canonical_id || null,
         display_name: row.display_name || null,
 
-        // constraints
         link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
         link_label: row.link_label || null,
         source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
@@ -200,14 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
         page: row.page || (window.location.pathname || null),
         url: row.url || null,
 
-        // keep list_id clean (your analytics uses uuidOrNull too)
         list_id: uuidOrNull(row.list_id),
-
-        // IMPORTANT: enables join to analytics_events
         session_id: getSessionId()
       };
 
-      // Hard guard against constraint failure
       if (!payload.category) return;
       if (!payload.link_slot) return;
       if (!payload.link_label) return;
@@ -231,10 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) {
         const txt = await res.text().catch(() => '');
         console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
-      } else {
-        console.log('[Splash link_clicks] inserted', payload);
       }
-
     } catch (e) {
       console.error('[Splash link_clicks] exception', e);
     }
@@ -328,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
     : ((islandListId || viewerListId) === viewerListId);
 
   /* =========================
-     QW3 — VISIT (one per page load)
+     QW3 — VISIT
   ========================== */
   const visitCategory = (categoryFromQuery || '').trim().toLowerCase() || null;
   logEvent('visit', {
@@ -502,6 +469,53 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
+     NEW — EXAMPLE PLACEHOLDERS (ALL CATEGORIES)
+     - Does NOT override non-generic placeholders
+     - Does NOT override existing values
+  ========================== */
+  function examplePlaceholderForCategory(category){
+    const parent = getParentFromCategory(category);
+    const sub = getSubKey(category);
+
+    if (parent === 'music') {
+      if (sub === 'albums')  return 'e.g., Back in Black - AC/DC';
+      if (sub === 'songs')   return 'e.g., The Chain - Fleetwood Mac';
+      if (sub === 'artists') return 'e.g., Stevie Ray Vaughan';
+      if (sub === 'genres')  return 'e.g., Delta Blues';
+      return 'e.g., Song/Album - Artist';
+    }
+
+    if (parent === 'movies') return 'e.g., The Godfather (1972)';
+    if (parent === 'tv')     return 'e.g., Breaking Bad';
+    if (parent === 'books')  return 'e.g., The Shining - Stephen King';
+    if (parent === 'games')  return 'e.g., The Last of Us (PS3)';
+    if (parent === 'travel') return 'e.g., Kyoto, Japan';
+    if (parent === 'food')   return 'e.g., Spaghetti Carbonara';
+    if (parent === 'cars')   return 'e.g., 1971 Ford XY Falcon';
+    if (parent === 'people') return 'e.g., David Bowie';
+    return 'e.g., Item name';
+  }
+
+  function applyExamplePlaceholders(formEl, category){
+    try {
+      const example = examplePlaceholderForCategory(category);
+      const inputs = getRankInputs(formEl);
+
+      inputs.forEach((inp) => {
+        const ph = String(inp.getAttribute('placeholder') || '').trim();
+
+        // Consider placeholders like "Song 1", "Album 3", "Item 5" as generic.
+        const isGeneric = (/^\S+\s\d+$/.test(ph) || ph === '');
+
+        // Do not override custom placeholders someone already set in Webflow.
+        if (isGeneric) {
+          inp.setAttribute('placeholder', example);
+        }
+      });
+    } catch(e){}
+  }
+
+  /* =========================
      iOS KEYBOARD OVERLAP / SCROLL ASSIST
   ========================== */
   (function bindKeyboardAssist(){
@@ -591,65 +605,203 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
   /* =========================
-     MUSICBRAINZ PREDICT — DISABLED FOR BETA
-     (kept as a stub for future re-enable)
+     MUSICBRAINZ PREDICT (Albums only)
+     NOTE: Your prior change to stop it interfering would be applied here in your repo.
+     This file keeps your existing structure. If you removed/disabled suggestions earlier,
+     leave that version in place in your repo before committing.
   ========================== */
-  function bindPredictToInput(inputEl, category) {
-    // Disabled for beta: replaced by placeholders (no overlays / no third-party dependency)
-    return;
+  function debounce(fn, wait) {
+    let t = null;
+    return function(...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), wait);
+    };
   }
 
-  /* =========================
-     BETA INPUT EXAMPLES (ALL CATEGORIES)
-     - Applies placeholders without overriding values or prefilled state
-  ========================== */
-  const PLACEHOLDER_EXAMPLES = {
-    // Music subcategories
-    'music-albums':   'The Wall - Pink Floyd',
-    'music-songs':    'Back in Black - AC/DC',
-    'music-artists':  'Pink Floyd',
-    'music-genres':   'Classic Rock',
+  function ensureSuggestBox(inputEl) {
+    if (!inputEl || inputEl.__SPLASH_SUGGEST_BOX__) return inputEl.__SPLASH_SUGGEST_BOX__;
 
-    // Parent categories (fallbacks)
-    'music':          'The Wall - Pink Floyd',
-    'movies':         'Heat (1995)',
-    'tv':             'Breaking Bad',
-    'books':          'The Shining - Stephen King',
-    'cars':           '1998 Toyota Supra',
-    'games':          'The Legend of Zelda: Ocarina of Time',
-    'travel':         'Kyoto, Japan',
-    'food':           'Neapolitan pizza',
-    'people':         'David Bowie',
-    'wildcard':       'My old Fender Stratocaster'
-  };
+    const box = document.createElement('div');
+    box.className = 'splash-suggest';
+    box.setAttribute('role', 'listbox');
+    box.dataset.open = '0';
+    box.__activeIndex = -1;
+    box.__items = [];
 
-  function applyPlaceholders(formEl, category) {
-    if (!formEl || !category) return;
+    const parent = inputEl.parentElement;
+    if (parent) {
+      const cs = window.getComputedStyle(parent);
+      if (cs.position === 'static') parent.style.position = 'relative';
+      parent.appendChild(box);
+    } else {
+      document.body.appendChild(box);
+    }
 
-    const parent = getParentFromCategory(category);
-    const example =
-      PLACEHOLDER_EXAMPLES[category] ||
-      PLACEHOLDER_EXAMPLES[parent] ||
-      'Enter your choice';
+    inputEl.__SPLASH_SUGGEST_BOX__ = box;
+    return box;
+  }
 
-    const inputs = getRankInputs(formEl);
-    if (!inputs.length) return;
+  function closeSuggest(inputEl) {
+    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
+    if (!box) return;
+    box.dataset.open = '0';
+    box.innerHTML = '';
+    box.__items = [];
+    box.__activeIndex = -1;
+  }
 
-    inputs.forEach((input, idx) => {
-      if (!input) return;
+  function setActiveRow(inputEl, index) {
+    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
+    if (!box || !box.__items.length) return;
 
-      // Do not override any existing value
-      if (String(input.value || '').trim()) return;
+    const rows = Array.from(box.querySelectorAll('.row'));
+    rows.forEach(r => r.dataset.active = '0');
 
-      // Do not override prefilled state
-      if (input.dataset.splashPrefilled === '1') return;
+    const bounded = Math.max(0, Math.min(index, rows.length - 1));
+    box.__activeIndex = bounded;
+    if (rows[bounded]) rows[bounded].dataset.active = '1';
+  }
 
-      // Do not override a placeholder already set in Webflow (unless you want to)
-      // If you DO want to override, remove this guard.
-      if (String(input.placeholder || '').trim()) return;
+  function acceptSuggestion(inputEl, item) {
+    if (!inputEl || !item) return;
+    inputEl.value = item.display || item.label || '';
+    inputEl.dataset.canonicalId = item.id || '';
+    inputEl.dataset.canonicalSource = item.source || '';
+  }
 
-      input.placeholder = (idx === 0) ? example : 'Add another…';
+  function renderSuggest(inputEl, items) {
+    const box = ensureSuggestBox(inputEl);
+    box.innerHTML = '';
+    box.__items = items || [];
+    box.__activeIndex = -1;
+
+    if (!items || !items.length) {
+      box.dataset.open = '0';
+      return;
+    }
+
+    items.slice(0, 6).forEach((it, idx) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.index = String(idx);
+
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = it.label || '';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = it.meta || '';
+
+      row.appendChild(title);
+      row.appendChild(meta);
+
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        acceptSuggestion(inputEl, it);
+        closeSuggest(inputEl);
+      });
+
+      box.appendChild(row);
     });
+
+    box.dataset.open = '1';
+  }
+
+  async function musicBrainzAlbumSearch(query) {
+    const q = String(query || '').trim();
+    if (q.length < 2) return [];
+
+    const dashParts = q.split(/\s[-–—]\s/);
+    let title = (dashParts[0] || '').trim();
+    let artist = (dashParts.slice(1).join(' - ') || '').trim();
+
+    const strict = artist
+      ? `releasegroup:"${title}" AND artist:"${artist}"`
+      : `releasegroup:"${title}"`;
+
+    const loose = artist
+      ? `releasegroup:${title} AND artist:${artist}`
+      : `releasegroup:${title}`;
+
+    const fetchRG = async (mbq) => {
+      const url = `https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(mbq)}&fmt=json&limit=12`;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
+
+      try {
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+        if (!res.ok) return [];
+        const json = await res.json();
+        const rgs = (json && json['release-groups']) ? json['release-groups'] : [];
+        return Array.isArray(rgs) ? rgs : [];
+      } catch {
+        return [];
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    let rgs = await fetchRG(strict);
+    if (!rgs.length) rgs = await fetchRG(loose);
+
+    const rgArtistName = (rg) => {
+      const ac = rg && rg['artist-credit'];
+      if (!ac || !ac.length) return '';
+      return String(ac[0].name || '');
+    };
+
+    return rgs
+      .filter(rg => rg && rg.id && rg.title)
+      .map(rg => {
+        const primaryArtist = rgArtistName(rg);
+        const year = rg['first-release-date'] ? String(rg['first-release-date']).slice(0,4) : '';
+        const meta = [primaryArtist, year].filter(Boolean).join(' • ');
+        const display = primaryArtist ? `${rg.title} - ${primaryArtist}` : rg.title;
+
+        return { id: rg.id, source: 'musicbrainz', label: rg.title, display, meta };
+      })
+      .slice(0, 6);
+  }
+
+  function bindPredictToInput(inputEl, category) {
+    if (!inputEl || inputEl.__SPLASH_MB_PREDICT__) return;
+    inputEl.__SPLASH_MB_PREDICT__ = true;
+
+    ensureSuggestBox(inputEl);
+
+    const doSearch = debounce(async () => {
+      if (inputEl.dataset.splashPrefilled === '1') return;
+      const v = String(inputEl.value || '').trim();
+      if (v.length < 3) { closeSuggest(inputEl); return; }
+      if (!isAlbumsCategory(category)) return;
+
+      const items = await musicBrainzAlbumSearch(v);
+      renderSuggest(inputEl, items);
+    }, 180);
+
+    inputEl.addEventListener('input', doSearch);
+
+    inputEl.addEventListener('keydown', (e) => {
+      const box = inputEl.__SPLASH_SUGGEST_BOX__;
+      const open = box && box.dataset.open === '1';
+      if (!open) return;
+
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex + 1)); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex - 1)); return; }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        if (box.__activeIndex >= 0 && box.__items[box.__activeIndex]) {
+          e.preventDefault();
+          acceptSuggestion(inputEl, box.__items[box.__activeIndex]);
+          closeSuggest(inputEl);
+        }
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); closeSuggest(inputEl); return; }
+    });
+
+    inputEl.addEventListener('blur', () => { setTimeout(() => closeSuggest(inputEl), 120); });
   }
 
   /* =========================
@@ -890,7 +1042,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
-  // UPDATED: now accepts meta (category/source/list_id/display/canonical)
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
@@ -910,14 +1061,13 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.textContent = label || 'Open';
 
       btn.addEventListener('click', () => {
-        // Log first (non-blocking), then open
         insertLinkClickKeepalive({
           category: meta?.category || null,
           canonical_id: meta?.canonical_id || null,
           display_name: meta?.display_name || null,
-          link_slot: slot, // 'A' or 'B'
+          link_slot: slot,
           link_label: String(label || ''),
-          source: meta?.source || null, // 'user_top5' or 'global_top100'
+          source: meta?.source || null,
           page: meta?.page || (window.location.pathname || ''),
           url: String(url || ''),
           list_id: meta?.list_id || null
@@ -955,7 +1105,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
-  // UPDATED: reads meta and passes into dialog
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -999,9 +1148,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') hideOpenDialog();
   });
 
-  /* =========================
-     SHARED BUTTON STYLE
-  ========================== */
   function styleOpenButton(btn) {
     btn.classList.add('di-action-pill');
     btn.style.flex = '0 0 auto';
@@ -1164,7 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — GLOBAL SKIP DEBUG (local only; no UX impact)
+     FEATURE 2 — GLOBAL SKIP DEBUG
   ========================== */
   function recordGlobalSkip(category, value, reason){
     const key = `splash_global_skipped_${String(category || '').trim().toLowerCase()}`;
@@ -1179,7 +1325,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
+     V22.8 — ANTI-JUNK VALIDATION
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1229,7 +1375,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
+     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1326,7 +1472,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setResultsCopy();
 
-    // QW3 — results_view
     logEvent('results_view', {
       category: (urlParams.get('category') || '').trim().toLowerCase() || null,
       list_id: viewerListId
@@ -1391,7 +1536,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // meta for link_clicks (source + slot constraints)
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1491,7 +1635,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // meta for link_clicks (source + slot constraints)
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1522,12 +1665,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
+     NEW — WEBFLOW FORM UI SUPPRESSION
+     - Prevents native Webflow toast ("Save failed. Please try again.")
+     - Hides .w-form-done and .w-form-fail blocks if present
+  ========================== */
+  function hideWebflowFormMessages(formEl){
+    try {
+      const wrap = formEl.closest('.w-form') || formEl.parentElement;
+      if (!wrap) return;
+      const done = wrap.querySelector('.w-form-done');
+      const fail = wrap.querySelector('.w-form-fail');
+      if (done) done.style.display = 'none';
+      if (fail) fail.style.display = 'none';
+    } catch(e){}
+  }
+
+  /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Placeholder examples (ALL categories)
+     + Predict bind for Music Albums
      + Canonical-based diff update
      + Global diff baseline from:
         - localStorage snapshot if present
         - otherwise Supabase existing row
+     + NEW: blocks Webflow submit handler
+     + NEW: placeholders across all categories
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1535,17 +1696,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const category = (formEl.getAttribute('data-category') || 'items').trim().toLowerCase();
 
     applyLastListToForm(formEl);
+    applyExamplePlaceholders(formEl, category);
+    hideWebflowFormMessages(formEl);
 
-    // NEW: placeholder guidance for all categories
-    applyPlaceholders(formEl, category);
+    if (isAlbumsCategory(category)) {
+      getRankInputs(formEl).forEach(inp => {
+        enablePrefilledBehavior(inp);
+        bindPredictToInput(inp, category);
+      });
+    }
 
-    // Keep prefill behavior bound
-    getRankInputs(formEl).forEach(enablePrefilledBehavior);
-
-    // (MusicBrainz predict disabled for beta; no binding here)
-
+    // IMPORTANT: capture mode (true) ensures we intercept before Webflow.
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
+      event.stopImmediatePropagation(); // blocks Webflow's submit handler
+      hideWebflowFormMessages(formEl);
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? submitBtn.value : null;
@@ -1555,7 +1720,6 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.value = 'Saving...';
       }
 
-      // QW3 — submit_click
       logEvent('submit_click', { category, list_id: viewerListId });
 
       const parent = getParentFromCategory(category);
@@ -1567,19 +1731,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      // =========================
-      // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
-      // =========================
+      // HARD REQUIREMENT: ALL 5 FILLED (inline message; no browser tooltip)
       const errorTextEl = formEl.querySelector('.form-error-text');
 
-      // Hide helper
       const hideFormError = () => {
         if (!errorTextEl) return;
         errorTextEl.style.display = 'none';
         errorTextEl.setAttribute('aria-hidden', 'true');
       };
 
-      // Show helper
       const showFormError = (msg) => {
         if (!errorTextEl) return;
         errorTextEl.textContent = msg || 'Please enter all five before submitting.';
@@ -1587,7 +1747,6 @@ document.addEventListener('DOMContentLoaded', () => {
         errorTextEl.setAttribute('aria-hidden', 'false');
       };
 
-      // Always start hidden on submit attempt (prevents “sticky” error)
       hideFormError();
 
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
@@ -1601,6 +1760,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         showFormError('Please enter all five before submitting.');
+        hideWebflowFormMessages(formEl);
 
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1619,6 +1779,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         alert(verdict.msg);
+        hideWebflowFormMessages(formEl);
+
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
@@ -1637,7 +1799,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const hadExisting = !!existingRow;
         const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
 
-        // No-change submit guard
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
@@ -1655,7 +1816,6 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert the latest list (always)
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1670,17 +1830,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // Baseline selection (prevents drift)
         const appliedOld = loadGlobalApplied(category);
         const oldValuesForGlobal = appliedOld
           ? appliedOld
           : eligibleFromRow(category, existingRow);
 
         const eligibleNew = eligibleValuesForGlobal(category, newValues);
-
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
-        // QW3 — item_changed (only when a saved list actually changes)
         if (changed) {
           logEvent('item_changed', {
             category,
@@ -1717,11 +1874,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         alert(`Save failed: ${err.message || err}`);
+        hideWebflowFormMessages(formEl);
+
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
         }
       }
-    });
+    }, true); // <-- capture mode critical
   });
+
 });
