@@ -1,19 +1,14 @@
-// SPLASH FOOTER JS — V24.3.1 (Beta Hardening + False Error Toast Fix)
+// Archived reference snapshot — functional change (MusicBrainz removed)
+// SPLASH FOOTER JS — V24.3.2 (Beta Hardening + Webflow Submit Override)
 // BASELINE: V24.2 (Beta Error Handling: global updates fail-soft)
-// Adds (6.1):
-//  - UUID listId hardening (splash_list_id always UUID; storage-blocked safe)
-//  - True double-submit prevention (form-level lock)
-//  - Timeout wrapper + offline-aware messaging
-//  - Prevent false "Save failed" after primary upsert success (success latch)
-// Keeps:
-//  - Analytics queue/flush fail-silent
-//  - Link_clicks keepalive (constraint-safe)
-//  - Ownership lock on shared islands
-//  - Global diff update (fail-soft)
-//  - Anti-junk validation + global eligibility gates
-//  - No-change submit guard
-//  - Open dialog sheet
-//  - Smart back buttons
+// Adds / Fixes (beta hardening):
+//  1) UUID-HARDENED listId creation (splash_list_id is always a valid UUID)
+//  2) True double-submit prevention (form-level lock)
+//  3) Timeout + offline-aware messaging for Supabase read/upsert
+//  4) Post-save error suppression: if primary list upsert succeeds, never show "Save failed"
+//  5) HARD override Webflow native form handler (capture phase + stopImmediatePropagation)
+//     - prevents Webflow "Thank you" success state from appearing in parallel
+// Keeps everything else unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -28,33 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
-
-  /* =========================
-     6.1 — HARDENING HELPERS
-  ========================== */
-  const SAVE_TIMEOUT_MS = 8000;
-
-  function isProbablyOffline() {
-    return (typeof navigator !== 'undefined' && navigator.onLine === false);
-  }
-
-  function withTimeout(promise, ms, label) {
-    let t;
-    const timeout = new Promise((_, reject) => {
-      t = setTimeout(() => reject(new Error(`timeout:${label || 'op'}`)), ms);
-    });
-    return Promise.race([
-      promise.finally(() => clearTimeout(t)),
-      timeout
-    ]);
-  }
-
-  function resetSubmitUI(submitBtn, originalBtnValue) {
-    if (!submitBtn) return;
-    submitBtn.disabled = false;
-    if ('value' in submitBtn) submitBtn.value = originalBtnValue || 'Submit';
-    else submitBtn.textContent = originalBtnValue || submitBtn.textContent || 'Submit';
-  }
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
@@ -447,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     LIST ID (Ownership-safe + UUID hardened)
+     LIST ID (UUID-HARDENED — Ownership-safe)
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
@@ -745,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
   /* =========================
-     CLEANUP: remove any old MusicBrainz suggest boxes if present
+     CLEANUP: remove any old MusicBrainz suggest boxes if present (from older builds)
   ========================== */
   document.querySelectorAll('.splash-suggest').forEach(el => el.remove());
 
@@ -957,7 +925,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!b.dataset.__diPrevOverflow) b.dataset.__diPrevOverflow = b.style.overflow || '';
     if (!b.dataset.__diPrevTouchAction) b.dataset.__diPrevTouchAction = b.style.touchAction || '';
-    if (!b.dataset.__diPrevHtmlOverflow) b.dataset.__diPrevHtmlOverflow = h.style.overflow || '';
+    if (!b.dataset.__diPrevHtmlOverflow) h.dataset.__diPrevHtmlOverflow = h.style.overflow || '';
 
     b.style.overflow = 'hidden';
     h.style.overflow = 'hidden';
@@ -970,7 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const prevOverflow = b.dataset.__diPrevOverflow;
     const prevTouch = b.dataset.__diPrevTouchAction;
-    const prevHtmlOverflow = b.dataset.__diPrevHtmlOverflow;
+    const prevHtmlOverflow = h.dataset.__diPrevHtmlOverflow;
 
     b.style.overflow = (prevOverflow !== undefined) ? prevOverflow : '';
     b.style.touchAction = (prevTouch !== undefined) ? prevTouch : '';
@@ -978,7 +946,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     delete b.dataset.__diPrevOverflow;
     delete b.dataset.__diPrevTouchAction;
-    delete b.dataset.__diPrevHtmlOverflow;
+    delete h.dataset.__diPrevHtmlOverflow;
   }
 
   function openInNewTab(url){
@@ -987,6 +955,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
+  // UPDATED: now accepts meta (category/source/list_id/display/canonical)
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
@@ -1051,6 +1020,7 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
+  // UPDATED: reads meta and passes into dialog
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1274,7 +1244,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION
+     V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1499,6 +1469,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
+            // meta for link_clicks
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1614,6 +1585,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
+          // meta for link_clicks
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1660,12 +1632,57 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
+     BETA HARDENING HELPERS (6.1)
+  ========================== */
+  const SAVE_TIMEOUT_MS = 8000;
+
+  function isProbablyOffline() {
+    return (typeof navigator !== 'undefined' && navigator.onLine === false);
+  }
+
+  function withTimeout(promise, ms, label) {
+    let t;
+    const timeout = new Promise((_, reject) => {
+      t = setTimeout(() => reject(new Error(`timeout:${label || 'op'}`)), ms);
+    });
+    return Promise.race([
+      promise.finally(() => clearTimeout(t)),
+      timeout
+    ]);
+  }
+
+  function resetSubmitUI(submitBtn, originalBtnValue) {
+    if (!submitBtn) return;
+    submitBtn.disabled = false;
+
+    // input[type=submit] uses .value; button uses .textContent
+    if ('value' in submitBtn && submitBtn.tagName === 'INPUT') {
+      submitBtn.value = originalBtnValue || 'Submit';
+    } else {
+      submitBtn.textContent = originalBtnValue || 'Submit';
+    }
+  }
+
+  // Webflow success/fail UI suppressor
+  function suppressWebflowFormStates(formEl){
+    try {
+      const wrap = formEl.closest('.w-form');
+      if (!wrap) return;
+
+      const done = wrap.querySelector('.w-form-done');
+      const fail = wrap.querySelector('.w-form-fail');
+
+      if (done) done.style.display = 'none';
+      if (fail) fail.style.display = 'none';
+    } catch {}
+  }
+
+  /* =========================
      FORM SUBMISSION (OVERWRITE)
      + Canonical-based diff update
      + Global diff baseline from:
         - localStorage snapshot if present
         - otherwise Supabase existing row
-     + 6.1 hardening: lock + timeout + offline messaging + success latch
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1679,8 +1696,14 @@ document.addEventListener('DOMContentLoaded', () => {
       getRankInputs(formEl).forEach(enablePrefilledBehavior);
     }
 
+    // CAPTURE PHASE + stopImmediatePropagation to fully override Webflow’s native handler
     formEl.addEventListener('submit', async (event) => {
+      // HARD OVERRIDE: prevent Webflow from handling this submit at all
       event.preventDefault();
+      event.stopPropagation();
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+      suppressWebflowFormStates(formEl);
 
       // HARD LOCK: prevents double-submit even if button disabling is bypassed
       if (formEl.__SPLASH_SUBMITTING__) return;
@@ -1689,11 +1712,13 @@ document.addEventListener('DOMContentLoaded', () => {
       let primarySaveSucceeded = false;
 
       const submitBtn = formEl.querySelector('[type="submit"]');
-      const originalBtnValue = submitBtn ? (submitBtn.value || submitBtn.textContent) : null;
+      const originalBtnValue = submitBtn
+        ? (submitBtn.tagName === 'INPUT' ? (submitBtn.value || '') : (submitBtn.textContent || ''))
+        : null;
 
       if (submitBtn) {
         submitBtn.disabled = true;
-        if ('value' in submitBtn) submitBtn.value = 'Saving...';
+        if (submitBtn.tagName === 'INPUT') submitBtn.value = 'Saving...';
         else submitBtn.textContent = 'Saving...';
       }
 
@@ -1712,7 +1737,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      // HARD REQUIREMENT: ALL 5 FILLED
+      // =========================
+      // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
+      // =========================
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
 
       if (!allFiveFilled) {
@@ -1739,6 +1766,7 @@ document.addEventListener('DOMContentLoaded', () => {
           message: verdict.msg
         });
 
+        // Prefer inline error; fall back to toast
         if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
 
         resetSubmitUI(submitBtn, originalBtnValue);
@@ -1779,7 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert the latest list (ONLY hard requirement)
+        // Upsert the latest list (always) — this is the ONLY "hard" requirement for success
         const { error: upErr } = await withTimeout(
           supabase
             .from('lists')
@@ -1798,15 +1826,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // ✅ From here on, never surface a "Save failed" to the user
+        // PRIMARY SAVE succeeded — from this point on, never show a "Save failed" UI
         primarySaveSucceeded = true;
 
+        // =========================
         // GLOBAL UPDATES (FAIL-SOFT)
+        // If this fails, DO NOT show "save failed" because the list is already saved.
+        // =========================
         let added = [];
         let removed = [];
         let globalOk = true;
 
         try {
+          // Baseline selection (prevents drift)
           const appliedOld = loadGlobalApplied(category);
           const oldValuesForGlobal = appliedOld
             ? appliedOld
@@ -1816,6 +1848,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           ({ added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew));
 
+          // item_changed only when a saved list actually changes
           if (changed) {
             logEvent('item_changed', {
               category,
@@ -1832,6 +1865,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (gerr) {
           globalOk = false;
 
+          // Record but do not block redirect
           logEvent('global_update_error', {
             category,
             list_id: viewerListId,
@@ -1840,6 +1874,7 @@ document.addEventListener('DOMContentLoaded', () => {
             removed: Array.isArray(removed) ? removed.length : null
           });
 
+          // Optional console for debugging; safe to keep
           console.warn('[Splash] Global update failed (fail-soft). List was saved; continuing.', gerr);
         }
 
@@ -1859,7 +1894,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       } catch (err) {
 
-        // 🚫 If primary save already succeeded, never surface an error
+        // 🚫 If the primary save already succeeded, never surface an error (avoid false negatives)
         if (primarySaveSucceeded) {
           console.warn('[Splash] Non-blocking post-save error:', err);
           return;
@@ -1886,7 +1921,6 @@ document.addEventListener('DOMContentLoaded', () => {
         resetSubmitUI(submitBtn, originalBtnValue);
         formEl.__SPLASH_SUBMITTING__ = false;
       }
-    });
+    }, true);
   });
-
 });
