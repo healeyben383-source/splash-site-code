@@ -1,9 +1,9 @@
 // Archived reference snapshot — updated
-// SPLASH FOOTER JS — V24.1 (Overlay Hard-Kill + Placeholder Reapply)
-// BASELINE: V24.0 (Webflow Submit Suppress + Example Placeholders)
-// Adds:
-// 1) Force-close any stuck overlays/backdrops on load (fixes iOS "dimmed + unclickable" issue)
-// 2) Re-apply example placeholders after Webflow pass + on focus (placeholders now reliably show)
+// SPLASH FOOTER JS — V24.2 (iOS Tap/Dim Fix + Placeholder Reapply)
+// BASELINE: V24.1 (Overlay Hard-Kill + Placeholder Reapply)
+// Fixes:
+// 1) iOS “dimmed + unclickable” regression: remove touchAction locking, use fixed-scroll lock, and make sheet inert when hidden
+// 2) Keep placeholder reapply after Webflow pass + on focus
 // Notes: No functional change to Supabase writes, analytics, link_clicks, global list, or anti-junk logic.
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      EXAMPLE PLACEHOLDERS (ALL CATEGORIES)
-     - Does NOT override non-generic placeholders
+     - Overrides generic placeholders ("Song 1", "Actor 3", etc.)
      - Does NOT override existing values
      - Re-applies after Webflow pass + on focus
   ========================== */
@@ -505,24 +505,24 @@ document.addEventListener('DOMContentLoaded', () => {
       const isGeneric = (ph) => {
         const p = String(ph || '').trim();
         if (!p) return true;
-
-        // "Song 1", "Artist 4", "Item 5", etc.
         if (/^[A-Za-z]+\s\d+$/.test(p)) return true;
-        if (/^(song|album|artist|item|rank)\s\d+$/i.test(p)) return true;
-
+        if (/^(song|album|artist|actor|movie|book|game|item|rank)\s\d+$/i.test(p)) return true;
         return false;
       };
 
       inputs.forEach((inp) => {
+        // never override actual user-entered values
+        if (String(inp.value || '').trim()) return;
+
         const ph = inp.getAttribute('placeholder') || '';
         if (isGeneric(ph)) {
           inp.setAttribute('placeholder', example);
         }
 
-        // If Webflow rewrites later, fix again on focus
         if (!inp.__SPLASH_PH_FIX__) {
           inp.__SPLASH_PH_FIX__ = true;
           inp.addEventListener('focus', () => {
+            if (String(inp.value || '').trim()) return;
             const ph2 = inp.getAttribute('placeholder') || '';
             if (isGeneric(ph2)) inp.setAttribute('placeholder', example);
           }, { passive: true });
@@ -967,8 +967,49 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
+     OPEN DIALOG (CREATE ONCE + LOCK SCROLL) — iOS SAFE
   ========================== */
+  const __LOCK_KEY__ = '__diScrollLockV2';
+  function lockScroll(){
+    try {
+      const b = document.body;
+
+      if (b.dataset[__LOCK_KEY__] === '1') return;
+      b.dataset[__LOCK_KEY__] = '1';
+
+      const y = window.scrollY || window.pageYOffset || 0;
+      b.dataset.__diScrollY = String(y);
+
+      // iOS-safe: freeze body position instead of touchAction:none
+      b.style.position = 'fixed';
+      b.style.top = `-${y}px`;
+      b.style.left = '0';
+      b.style.right = '0';
+      b.style.width = '100%';
+    } catch(e){}
+  }
+
+  function unlockScroll(){
+    try {
+      const b = document.body;
+      const wasLocked = b.dataset[__LOCK_KEY__] === '1';
+      const y = parseInt(b.dataset.__diScrollY || '0', 10) || 0;
+
+      b.style.position = '';
+      b.style.top = '';
+      b.style.left = '';
+      b.style.right = '';
+      b.style.width = '';
+
+      delete b.dataset.__diScrollY;
+      delete b.dataset[__LOCK_KEY__];
+
+      if (wasLocked) {
+        window.scrollTo(0, y);
+      }
+    } catch(e){}
+  }
+
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
     if (sheet) return sheet;
@@ -976,7 +1017,10 @@ document.addEventListener('DOMContentLoaded', () => {
     sheet = document.createElement('div');
     sheet.className = 'di-open-sheet';
     sheet.setAttribute('aria-hidden','true');
-    sheet.style.display = 'none'; // IMPORTANT: never start open (prevents stuck overlay on iOS)
+
+    // Hidden must be inert (prevents iOS tap-blocking)
+    sheet.style.display = 'none';
+    sheet.style.pointerEvents = 'none';
 
     sheet.innerHTML = `
       <div class="di-open-backdrop"></div>
@@ -1018,36 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     return sheet;
-  }
-
-  function lockScroll(){
-    const b = document.body;
-    const h = document.documentElement;
-
-    if (!b.dataset.__diPrevOverflow) b.dataset.__diPrevOverflow = b.style.overflow || '';
-    if (!b.dataset.__diPrevTouchAction) b.dataset.__diPrevTouchAction = b.style.touchAction || '';
-    if (!b.dataset.__diPrevHtmlOverflow) b.dataset.__diPrevHtmlOverflow = h.style.overflow || '';
-
-    b.style.overflow = 'hidden';
-    h.style.overflow = 'hidden';
-    b.style.touchAction = 'none';
-  }
-
-  function unlockScroll(){
-    const b = document.body;
-    const h = document.documentElement;
-
-    const prevOverflow = b.dataset.__diPrevOverflow;
-    const prevTouch = b.dataset.__diPrevTouchAction;
-    const prevHtmlOverflow = b.dataset.__diPrevHtmlOverflow;
-
-    b.style.overflow = (prevOverflow !== undefined) ? prevOverflow : '';
-    b.style.touchAction = (prevTouch !== undefined) ? prevTouch : '';
-    h.style.overflow = (prevHtmlOverflow !== undefined) ? prevHtmlOverflow : '';
-
-    delete b.dataset.__diPrevOverflow;
-    delete b.dataset.__diPrevTouchAction;
-    delete b.dataset.__diPrevHtmlOverflow;
   }
 
   function openInNewTab(url){
@@ -1107,34 +1121,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!aUrl && !bUrl) body.textContent = 'No links available.';
 
     lockScroll();
+
     sheet.style.display = 'block';
+    sheet.style.pointerEvents = 'auto';
     sheet.setAttribute('aria-hidden','false');
   }
 
   function hideOpenDialog() {
     const sheet = document.querySelector('.di-open-sheet');
-    if (!sheet) { unlockScroll(); return; }
-    sheet.style.display = 'none';
-    sheet.setAttribute('aria-hidden', 'true');
+    if (sheet) {
+      sheet.setAttribute('aria-hidden', 'true');
+      sheet.style.pointerEvents = 'none';
+      sheet.style.display = 'none';
+    }
     unlockScroll();
   }
 
   // HARD KILL any stuck overlays on load (prevents dimmed / unclickable screen on iOS)
   (function forceCloseOverlaysOnLoad(){
     try {
-      // Ensure scroll is restored no matter what
-      unlockScroll();
+      hideOpenDialog();
 
-      const sheet = document.querySelector('.di-open-sheet');
-      if (sheet) {
-        sheet.style.display = 'none';
-        sheet.setAttribute('aria-hidden', 'true');
-      }
-
-      // Also defensively clear any lingering overflow locks
-      document.body.style.overflow = '';
-      document.documentElement.style.overflow = '';
-      document.body.style.touchAction = '';
+      // Defensive: clear any legacy fixed locks if they existed
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      document.body.style.width = '';
     } catch(e) {}
   })();
 
@@ -1554,7 +1567,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!v) return;
 
             const li = document.createElement('li');
-            styleRowLi(li);
+            li.style.display = 'flex';
+            li.style.alignItems = 'center';
+            li.style.justifyContent = 'space-between';
+            li.style.gap = '12px';
 
             const textSpan = document.createElement('span');
             textSpan.textContent = v;
@@ -1579,7 +1595,8 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
-            styleOpenButton(openBtn);
+            openBtn.classList.add('di-action-pill');
+            openBtn.style.flex = '0 0 auto';
 
             li.appendChild(textSpan);
             li.appendChild(openBtn);
@@ -1635,7 +1652,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const count = Number(row.count || 0);
 
           const li = document.createElement('li');
-          styleRowLi(li);
+          li.style.display = 'flex';
+          li.style.alignItems = 'center';
+          li.style.justifyContent = 'space-between';
+          li.style.gap = '12px';
 
           const left = document.createElement('div');
           left.className = 'di-g-left';
@@ -1678,7 +1698,8 @@ document.addEventListener('DOMContentLoaded', () => {
           };
           openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
-          styleOpenButton(openBtn);
+          openBtn.classList.add('di-action-pill');
+          openBtn.style.flex = '0 0 auto';
 
           right.appendChild(countEl);
           right.appendChild(openBtn);
@@ -1737,7 +1758,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // IMPORTANT: capture mode (true) ensures we intercept before Webflow.
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
-      event.stopImmediatePropagation(); // blocks Webflow's submit handler
+      event.stopImmediatePropagation();
       hideWebflowFormMessages(formEl);
 
       const submitBtn = formEl.querySelector('[type="submit"]');
@@ -1759,7 +1780,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      // HARD REQUIREMENT: ALL 5 FILLED (inline message; no browser tooltip)
       const errorTextEl = formEl.querySelector('.form-error-text');
 
       const hideFormError = () => {
@@ -1909,7 +1929,7 @@ document.addEventListener('DOMContentLoaded', () => {
           submitBtn.value = originalBtnValue || 'Submit';
         }
       }
-    }, true); // <-- capture mode critical
+    }, true);
   });
 
 });
