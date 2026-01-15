@@ -1,14 +1,19 @@
-// Archived reference snapshot — functional change (Release Hardening)
-// SPLASH FOOTER JS — V24.3 (Beta Release Hardening: UUID-safe listId + true submit lock + timeout/offline messaging) — NO MUSICBRAINZ
-// BASELINE: V24.2
-// Adds (Section 6.1):
-//  (1) listId UUID hardening: splash_list_id is always a valid UUID (repairs legacy/non-uuid values)
-//  (2) True double-submit prevention: form-level submit lock (not just button disabled)
-//  (3) Timeout + offline-aware messaging for Supabase operations (read/upsert)
-// Notes:
-//  - No refactors; additive/surgical changes only
-//  - Global updates remain fail-soft (never blocks redirect if list upsert succeeds)
-//  - Keeps analytics/link_clicks behavior unchanged
+// SPLASH FOOTER JS — V24.3.1 (Beta Hardening + False Error Toast Fix)
+// BASELINE: V24.2 (Beta Error Handling: global updates fail-soft)
+// Adds (6.1):
+//  - UUID listId hardening (splash_list_id always UUID; storage-blocked safe)
+//  - True double-submit prevention (form-level lock)
+//  - Timeout wrapper + offline-aware messaging
+//  - Prevent false "Save failed" after primary upsert success (success latch)
+// Keeps:
+//  - Analytics queue/flush fail-silent
+//  - Link_clicks keepalive (constraint-safe)
+//  - Ownership lock on shared islands
+//  - Global diff update (fail-soft)
+//  - Anti-junk validation + global eligibility gates
+//  - No-change submit guard
+//  - Open dialog sheet
+//  - Smart back buttons
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -25,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
   /* =========================
-     BETA HARDENING HELPERS (6.1)
+     6.1 — HARDENING HELPERS
   ========================== */
   const SAVE_TIMEOUT_MS = 8000;
 
@@ -47,8 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetSubmitUI(submitBtn, originalBtnValue) {
     if (!submitBtn) return;
     submitBtn.disabled = false;
-
-    // Works for <input type="submit"> and <button>
     if ('value' in submitBtn) submitBtn.value = originalBtnValue || 'Submit';
     else submitBtn.textContent = originalBtnValue || submitBtn.textContent || 'Submit';
   }
@@ -343,10 +346,10 @@ document.addEventListener('DOMContentLoaded', () => {
         page: row.page || (window.location.pathname || null),
         url: row.url || null,
 
-        // keep list_id clean (your analytics uses uuidOrNull too)
+        // keep list_id clean
         list_id: uuidOrNull(row.list_id),
 
-        // IMPORTANT: enables join to analytics_events
+        // enables join to analytics_events
         session_id: getSessionId()
       };
 
@@ -444,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     LIST ID (V22.9 — Ownership-safe) — UUID HARDENED (6.1)
+     LIST ID (Ownership-safe + UUID hardened)
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
@@ -742,7 +745,7 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
   /* =========================
-     CLEANUP: remove any old MusicBrainz suggest boxes if present (from older builds)
+     CLEANUP: remove any old MusicBrainz suggest boxes if present
   ========================== */
   document.querySelectorAll('.splash-suggest').forEach(el => el.remove());
 
@@ -984,7 +987,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
-  // UPDATED: now accepts meta (category/source/list_id/display/canonical)
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
@@ -1049,7 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unlockScroll();
   }
 
-  // UPDATED: reads meta and passes into dialog
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1273,7 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
+     V22.8 — ANTI-JUNK VALIDATION
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1498,7 +1499,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            // meta for link_clicks
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1614,7 +1614,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          // meta for link_clicks
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1666,6 +1665,7 @@ document.addEventListener('DOMContentLoaded', () => {
      + Global diff baseline from:
         - localStorage snapshot if present
         - otherwise Supabase existing row
+     + 6.1 hardening: lock + timeout + offline messaging + success latch
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1685,6 +1685,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // HARD LOCK: prevents double-submit even if button disabling is bypassed
       if (formEl.__SPLASH_SUBMITTING__) return;
       formEl.__SPLASH_SUBMITTING__ = true;
+
+      let primarySaveSucceeded = false;
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? (submitBtn.value || submitBtn.textContent) : null;
@@ -1710,9 +1712,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      // =========================
-      // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
-      // =========================
+      // HARD REQUIREMENT: ALL 5 FILLED
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
 
       if (!allFiveFilled) {
@@ -1739,7 +1739,6 @@ document.addEventListener('DOMContentLoaded', () => {
           message: verdict.msg
         });
 
-        // Prefer inline error; fall back to toast
         if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
 
         resetSubmitUI(submitBtn, originalBtnValue);
@@ -1780,7 +1779,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert the latest list (always) — this is the ONLY "hard" requirement for success
+        // Upsert the latest list (ONLY hard requirement)
         const { error: upErr } = await withTimeout(
           supabase
             .from('lists')
@@ -1799,16 +1798,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // =========================
+        // ✅ From here on, never surface a "Save failed" to the user
+        primarySaveSucceeded = true;
+
         // GLOBAL UPDATES (FAIL-SOFT)
-        // If this fails, DO NOT show "save failed" because the list is already saved.
-        // =========================
         let added = [];
         let removed = [];
         let globalOk = true;
 
         try {
-          // Baseline selection (prevents drift)
           const appliedOld = loadGlobalApplied(category);
           const oldValuesForGlobal = appliedOld
             ? appliedOld
@@ -1818,7 +1816,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
           ({ added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew));
 
-          // item_changed only when a saved list actually changes
           if (changed) {
             logEvent('item_changed', {
               category,
@@ -1835,7 +1832,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (gerr) {
           globalOk = false;
 
-          // Record but do not block redirect
           logEvent('global_update_error', {
             category,
             list_id: viewerListId,
@@ -1844,7 +1840,6 @@ document.addEventListener('DOMContentLoaded', () => {
             removed: Array.isArray(removed) ? removed.length : null
           });
 
-          // Optional console for debugging; safe to keep
           console.warn('[Splash] Global update failed (fail-soft). List was saved; continuing.', gerr);
         }
 
@@ -1863,7 +1858,13 @@ document.addEventListener('DOMContentLoaded', () => {
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
-        // This catch is now ONLY for true failures (e.g., upsert failed, timed out)
+
+        // 🚫 If primary save already succeeded, never surface an error
+        if (primarySaveSucceeded) {
+          console.warn('[Splash] Non-blocking post-save error:', err);
+          return;
+        }
+
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1873,6 +1874,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let m = 'Save failed. Please try again.';
         const msg = String(err && (err.message || err) || '');
+
         if (msg.startsWith('timeout:')) {
           m = isProbablyOffline()
             ? 'You appear to be offline. Please reconnect and try again.'
@@ -1881,10 +1883,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!setInlineError(formEl, m)) toast(m, 'error');
 
-        // Unlock + restore UI
         resetSubmitUI(submitBtn, originalBtnValue);
         formEl.__SPLASH_SUBMITTING__ = false;
       }
     });
   });
+
 });
