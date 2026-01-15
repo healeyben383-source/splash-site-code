@@ -1,8 +1,9 @@
 // Archived reference snapshot — functional change (MusicBrainz removed)
-// SPLASH FOOTER JS — V24.1 (Beta Error Handling: Toast + Retry, No Alerts) — NO MUSICBRAINZ
-// BASELINE: V24.0
-// Removes:
-//  - MusicBrainz predictive search + suggestion UI (albums only)
+// SPLASH FOOTER JS — V24.2 (Beta Error Handling: FIX false "Save failed" by making global updates fail-soft) — NO MUSICBRAINZ
+// BASELINE: V24.1
+// Fixes:
+//  - Prevents "Save failed. Please try again." when lists upsert succeeds but global_items diff update fails
+//  - Global updates now fail-soft: logs analytics and continues redirect
 // Keeps everything else unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1733,7 +1734,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Upsert the latest list (always)
+        // Upsert the latest list (always) — this is the ONLY "hard" requirement for success
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1748,37 +1749,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
-        // Baseline selection (prevents drift)
-        const appliedOld = loadGlobalApplied(category);
-        const oldValuesForGlobal = appliedOld
-          ? appliedOld
-          : eligibleFromRow(category, existingRow);
+        // =========================
+        // GLOBAL UPDATES (FAIL-SOFT)
+        // If this fails, DO NOT show "save failed" because the list is already saved.
+        // =========================
+        let added = [];
+        let removed = [];
+        let globalOk = true;
 
-        const eligibleNew = eligibleValuesForGlobal(category, newValues);
+        try {
+          // Baseline selection (prevents drift)
+          const appliedOld = loadGlobalApplied(category);
+          const oldValuesForGlobal = appliedOld
+            ? appliedOld
+            : eligibleFromRow(category, existingRow);
 
-        const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
+          const eligibleNew = eligibleValuesForGlobal(category, newValues);
 
-        // item_changed only when a saved list actually changes
-        if (changed) {
-          logEvent('item_changed', {
+          ({ added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew));
+
+          // item_changed only when a saved list actually changes
+          if (changed) {
+            logEvent('item_changed', {
+              category,
+              list_id: viewerListId,
+              added: added.length,
+              removed: removed.length
+            });
+          }
+
+          for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
+          for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
+
+          saveGlobalApplied(category, eligibleNew);
+        } catch (gerr) {
+          globalOk = false;
+
+          // Record but do not block redirect
+          logEvent('global_update_error', {
             category,
             list_id: viewerListId,
-            added: added.length,
-            removed: removed.length
+            message: String(gerr && (gerr.message || gerr) || 'unknown'),
+            added: Array.isArray(added) ? added.length : null,
+            removed: Array.isArray(removed) ? removed.length : null
           });
+
+          // Optional console for debugging; safe to keep
+          console.warn('[Splash] Global update failed (fail-soft). List was saved; continuing.', gerr);
         }
-
-        for (const r of removed) await decrementGlobalItemByCanonical(category, r.canon);
-        for (const a of added)   await incrementGlobalItemByCanonical(category, a.canon, a.display);
-
-        saveGlobalApplied(category, eligibleNew);
 
         logEvent('submit_success', {
           category,
           list_id: viewerListId,
           changed: true,
-          added: added.length,
-          removed: removed.length
+          added: Array.isArray(added) ? added.length : 0,
+          removed: Array.isArray(removed) ? removed.length : 0,
+          global_ok: globalOk
         });
 
         window.location.href =
@@ -1787,6 +1813,7 @@ document.addEventListener('DOMContentLoaded', () => {
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
+        // This catch is now ONLY for true failures (e.g., upsert failed)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
