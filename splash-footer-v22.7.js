@@ -1,10 +1,14 @@
-// Archived reference snapshot — functional change (MusicBrainz removed)
-// SPLASH FOOTER JS — V24.2 (Beta Error Handling: FIX false "Save failed" by making global updates fail-soft) — NO MUSICBRAINZ
-// BASELINE: V24.1
-// Fixes:
-//  - Prevents "Save failed. Please try again." when lists upsert succeeds but global_items diff update fails
-//  - Global updates now fail-soft: logs analytics and continues redirect
-// Keeps everything else unchanged.
+// Archived reference snapshot — functional change (Release Hardening)
+// SPLASH FOOTER JS — V24.3 (Beta Release Hardening: UUID-safe listId + true submit lock + timeout/offline messaging) — NO MUSICBRAINZ
+// BASELINE: V24.2
+// Adds (Section 6.1):
+//  (1) listId UUID hardening: splash_list_id is always a valid UUID (repairs legacy/non-uuid values)
+//  (2) True double-submit prevention: form-level submit lock (not just button disabled)
+//  (3) Timeout + offline-aware messaging for Supabase operations (read/upsert)
+// Notes:
+//  - No refactors; additive/surgical changes only
+//  - Global updates remain fail-soft (never blocks redirect if list upsert succeeds)
+//  - Keeps analytics/link_clicks behavior unchanged
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -19,6 +23,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
+
+  /* =========================
+     BETA HARDENING HELPERS (6.1)
+  ========================== */
+  const SAVE_TIMEOUT_MS = 8000;
+
+  function isProbablyOffline() {
+    return (typeof navigator !== 'undefined' && navigator.onLine === false);
+  }
+
+  function withTimeout(promise, ms, label) {
+    let t;
+    const timeout = new Promise((_, reject) => {
+      t = setTimeout(() => reject(new Error(`timeout:${label || 'op'}`)), ms);
+    });
+    return Promise.race([
+      promise.finally(() => clearTimeout(t)),
+      timeout
+    ]);
+  }
+
+  function resetSubmitUI(submitBtn, originalBtnValue) {
+    if (!submitBtn) return;
+    submitBtn.disabled = false;
+
+    // Works for <input type="submit"> and <button>
+    if ('value' in submitBtn) submitBtn.value = originalBtnValue || 'Submit';
+    else submitBtn.textContent = originalBtnValue || submitBtn.textContent || 'Submit';
+  }
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
@@ -411,19 +444,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     LIST ID (V22.9 — Ownership-safe)
+     LIST ID (V22.9 — Ownership-safe) — UUID HARDENED (6.1)
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
   function getOrCreateListId() {
-    let id = localStorage.getItem(LIST_ID_KEY);
-    if (!id) {
-      id = (window.crypto && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : (Date.now() + '-' + Math.random().toString(16).slice(2));
-      localStorage.setItem(LIST_ID_KEY, id);
+    try {
+      // Read
+      let id = localStorage.getItem(LIST_ID_KEY);
+      id = uuidOrNull(id);
+
+      // Create/repair (MUST be UUID)
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
+        localStorage.setItem(LIST_ID_KEY, id);
+      }
+
+      return id;
+    } catch {
+      // Storage blocked (private browsing / iOS edge cases) — still return UUID
+      return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
     }
-    return id;
   }
 
   const viewerListId = getOrCreateListId();
@@ -1641,12 +1682,17 @@ document.addEventListener('DOMContentLoaded', () => {
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
 
+      // HARD LOCK: prevents double-submit even if button disabling is bypassed
+      if (formEl.__SPLASH_SUBMITTING__) return;
+      formEl.__SPLASH_SUBMITTING__ = true;
+
       const submitBtn = formEl.querySelector('[type="submit"]');
-      const originalBtnValue = submitBtn ? submitBtn.value : null;
+      const originalBtnValue = submitBtn ? (submitBtn.value || submitBtn.textContent) : null;
 
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.value = 'Saving...';
+        if ('value' in submitBtn) submitBtn.value = 'Saving...';
+        else submitBtn.textContent = 'Saving...';
       }
 
       // clear any previous inline error on each attempt
@@ -1679,10 +1725,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         setInlineError(formEl, 'Please enter all five before submitting.');
 
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.value = originalBtnValue || 'Submit';
-        }
+        resetSubmitUI(submitBtn, originalBtnValue);
+        formEl.__SPLASH_SUBMITTING__ = false;
         return;
       }
 
@@ -1698,20 +1742,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Prefer inline error; fall back to toast
         if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
 
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.value = originalBtnValue || 'Submit';
-        }
+        resetSubmitUI(submitBtn, originalBtnValue);
+        formEl.__SPLASH_SUBMITTING__ = false;
         return;
       }
 
       try {
-        const { data: existingRow, error: readErr } = await supabase
-          .from('lists')
-          .select('v1,v2,v3,v4,v5')
-          .eq('user_id', viewerListId)
-          .eq('category', category)
-          .maybeSingle();
+        const { data: existingRow, error: readErr } = await withTimeout(
+          supabase
+            .from('lists')
+            .select('v1,v2,v3,v4,v5')
+            .eq('user_id', viewerListId)
+            .eq('category', category)
+            .maybeSingle(),
+          SAVE_TIMEOUT_MS,
+          'read_list'
+        );
 
         const hadExisting = !!existingRow;
         const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
@@ -1735,17 +1781,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Upsert the latest list (always) — this is the ONLY "hard" requirement for success
-        const { error: upErr } = await supabase
-          .from('lists')
-          .upsert({
-            user_id: viewerListId,
-            category: category,
-            v1: newValues[0] || null,
-            v2: newValues[1] || null,
-            v3: newValues[2] || null,
-            v4: newValues[3] || null,
-            v5: newValues[4] || null
-          }, { onConflict: 'user_id,category' });
+        const { error: upErr } = await withTimeout(
+          supabase
+            .from('lists')
+            .upsert({
+              user_id: viewerListId,
+              category: category,
+              v1: newValues[0] || null,
+              v2: newValues[1] || null,
+              v3: newValues[2] || null,
+              v4: newValues[3] || null,
+              v5: newValues[4] || null
+            }, { onConflict: 'user_id,category' }),
+          SAVE_TIMEOUT_MS,
+          'upsert_list'
+        );
 
         if (upErr) throw upErr;
 
@@ -1813,7 +1863,7 @@ document.addEventListener('DOMContentLoaded', () => {
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
-        // This catch is now ONLY for true failures (e.g., upsert failed)
+        // This catch is now ONLY for true failures (e.g., upsert failed, timed out)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1821,13 +1871,19 @@ document.addEventListener('DOMContentLoaded', () => {
           message: String(err && (err.message || err) || 'unknown')
         });
 
-        const m = 'Save failed. Please try again.';
+        let m = 'Save failed. Please try again.';
+        const msg = String(err && (err.message || err) || '');
+        if (msg.startsWith('timeout:')) {
+          m = isProbablyOffline()
+            ? 'You appear to be offline. Please reconnect and try again.'
+            : 'Saving is taking longer than expected. Please try again.';
+        }
+
         if (!setInlineError(formEl, m)) toast(m, 'error');
 
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.value = originalBtnValue || 'Submit';
-        }
+        // Unlock + restore UI
+        resetSubmitUI(submitBtn, originalBtnValue);
+        formEl.__SPLASH_SUBMITTING__ = false;
       }
     });
   });
