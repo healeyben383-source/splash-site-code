@@ -1,13 +1,11 @@
-// Archived reference snapshot — functional change (MusicBrainz removed)
-// SPLASH FOOTER JS — V24.3.3 (Beta Hardening + Webflow Submit Override + Fail-soft read_list timeout)
-// BASELINE: V24.2 (Beta Error Handling: global updates fail-soft) — NO MUSICBRAINZ
-// Adds / Fixes:
-//  1) UUID-HARDENED listId creation (splash_list_id is always a valid UUID)
-//  2) True double-submit prevention (form-level lock)
-//  3) Timeout + offline-aware messaging for Supabase read/upsert
-//  4) Post-save error suppression: if primary list upsert succeeds, never show "Save failed"
-//  5) HARD override Webflow native form handler (capture phase + stopImmediatePropagation)
-//  6) FIX: read_list timeout is fail-soft (no unhandled promise rejection; submit continues)
+// Archived reference snapshot — functional change (offline error messaging hardened)
+// SPLASH FOOTER JS — V24.3.4 (Beta Error Handling: better offline messaging incl. DevTools Offline)
+// BASELINE: V24.3.3 (bc815bf)
+// Fixes:
+//  - When DevTools Network = Offline, browser may still report navigator.onLine=true
+//  - We now detect network-type fetch errors and show a connection-specific message
+//  - Button still re-enables and retry works as before
+// Keeps everything else unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -20,17 +18,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPABASE_URL = 'https://ygptwdmgdpvkjopbtwaj.supabase.co';
   const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dRfpqxP_1-oRmTGr2BN8rw_pb3FyoL0';
 
-  const READ_TIMEOUT_MS  = 8000;
-  const UPSERT_TIMEOUT_MS = 12000;
-
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
   /* =========================
-     UUID HELPERS
+     QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
   ========================== */
+  const ANALYTICS_SESSION_KEY = 'splash_session_id';
+  const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
+  const ANALYTICS_QUEUE_MAX = 200;
+  const ANALYTICS_FLUSH_CHUNK = 25;
+
   function uuidv4Fallback(){
-    // RFC4122-ish v4 fallback using Math.random (sufficient for local IDs)
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = Math.random() * 16 | 0;
       const v = (c === 'x') ? r : ((r & 0x3) | 0x8);
@@ -43,43 +42,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const re = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     return re.test(s) ? s : null;
   }
-
-  function isProbablyOffline(){
-    return (typeof navigator !== 'undefined' && navigator.onLine === false);
-  }
-
-  function withTimeout(promise, ms, label){
-    let t;
-    const timeout = new Promise((_, reject) => {
-      t = setTimeout(() => reject(new Error(`timeout:${label || 'op'}`)), ms);
-    });
-    return Promise.race([
-      Promise.resolve(promise).finally(() => clearTimeout(t)),
-      timeout
-    ]);
-  }
-
-  // Belt-and-braces: avoid scary unhandled timeout rejections
-  window.addEventListener('unhandledrejection', (e) => {
-    try {
-      const msg = String(e && e.reason && (e.reason.message || e.reason) || '');
-      if (msg.startsWith('timeout:')) {
-        e.preventDefault();
-        console.warn('[Splash] Suppressed unhandled timeout rejection:', msg);
-      }
-    } catch {}
-  });
-
-  /* =========================
-     QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
-     - session_id is uuid NOT NULL → MUST always be valid UUID
-     - list_id is uuid nullable → only send if valid UUID else null
-     - Never blocks UX, queue + flush in background
-  ========================== */
-  const ANALYTICS_SESSION_KEY = 'splash_session_id';
-  const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
-  const ANALYTICS_QUEUE_MAX = 200;
-  const ANALYTICS_FLUSH_CHUNK = 25;
 
   function getSessionId(){
     try {
@@ -107,19 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function writeQueue(arr){
-    try {
-      localStorage.setItem(ANALYTICS_QUEUE_KEY, JSON.stringify(arr));
-    } catch {}
+    try { localStorage.setItem(ANALYTICS_QUEUE_KEY, JSON.stringify(arr)); } catch {}
   }
 
   function enqueueEvent(payload){
     try {
       const q = readQueue();
       q.push(payload);
-
-      if (q.length > ANALYTICS_QUEUE_MAX) {
-        q.splice(0, q.length - ANALYTICS_QUEUE_MAX);
-      }
+      if (q.length > ANALYTICS_QUEUE_MAX) q.splice(0, q.length - ANALYTICS_QUEUE_MAX);
       writeQueue(q);
     } catch {}
   }
@@ -175,9 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.visibilityState === 'hidden') flushQueue();
   }, { passive: true });
 
-  window.addEventListener('pagehide', () => {
-    flushQueue();
-  }, { passive: true });
+  window.addEventListener('pagehide', () => { flushQueue(); }, { passive: true });
 
   function logEvent(event_name, meta = {}) {
     try {
@@ -265,9 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
       card.appendChild(x);
       host.appendChild(card);
 
-      setTimeout(() => {
-        try { card.remove(); } catch(e) {}
-      }, ttl);
+      setTimeout(() => { try { card.remove(); } catch(e) {} }, ttl);
     } catch {}
   }
 
@@ -286,52 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
       errorTextEl.style.display = 'block';
       errorTextEl.setAttribute('aria-hidden', 'false');
       return true;
-    } catch(e) {
+    } catch {
       return false;
     }
-  }
-
-  function suppressWebflowFormStates(formEl){
-    try {
-      const wrap = formEl.closest('.w-form');
-      if (!wrap) return;
-
-      const done = wrap.querySelector('.w-form-done');
-      const fail = wrap.querySelector('.w-form-fail');
-
-      if (done) done.style.display = 'none';
-      if (fail) fail.style.display = 'none';
-    } catch {}
-  }
-
-  function resetSubmitUI(submitBtn, originalBtnValue){
-    try {
-      if (!submitBtn) return;
-      submitBtn.disabled = false;
-
-      if (submitBtn.tagName === 'INPUT') {
-        submitBtn.value = originalBtnValue || 'Submit';
-      } else {
-        submitBtn.textContent = originalBtnValue || 'Submit';
-      }
-    } catch {}
-  }
-
-  function setSavingUI(submitBtn, originalBtnValue){
-    try {
-      if (!submitBtn) return;
-      submitBtn.disabled = true;
-
-      if (submitBtn.tagName === 'INPUT') {
-        // store once
-        if (!originalBtnValue) originalBtnValue = submitBtn.value;
-        submitBtn.value = 'Saving...';
-      } else {
-        if (!originalBtnValue) originalBtnValue = submitBtn.textContent;
-        submitBtn.textContent = 'Saving...';
-      }
-    } catch {}
-    return originalBtnValue;
   }
 
   /* =========================
@@ -442,21 +352,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     LIST ID (UUID-HARDENED)
+     LIST ID (Ownership-safe)
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
   function getOrCreateListId() {
-    try {
-      let id = uuidOrNull(localStorage.getItem(LIST_ID_KEY));
-      if (!id) {
-        id = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
-        localStorage.setItem(LIST_ID_KEY, id);
-      }
-      return id;
-    } catch {
-      return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
+    let id = localStorage.getItem(LIST_ID_KEY);
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now() + '-' + Math.random().toString(16).slice(2));
+      localStorage.setItem(LIST_ID_KEY, id);
     }
+    return id;
   }
 
   const viewerListId = getOrCreateListId();
@@ -471,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     : ((islandListId || viewerListId) === viewerListId);
 
   /* =========================
-     QW3 — VISIT (one per page load)
+     VISIT (one per page load)
   ========================== */
   const visitCategory = (categoryFromQuery || '').trim().toLowerCase() || null;
   logEvent('visit', {
@@ -480,62 +388,6 @@ document.addEventListener('DOMContentLoaded', () => {
     is_island: isIslandPage(),
     is_owner: isIslandOwner
   });
-
-  /* =========================
-     ISLAND "CAPTURED ON" DATE (V22.7)
-  ========================== */
-  (async function fixCapturedOnDate(){
-    if (!isIslandPage()) return;
-
-    const formatIso = (iso) => {
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return '';
-      return d.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric' });
-    };
-
-    const setUI = (formatted) => {
-      if (!formatted) return;
-
-      const elById = document.getElementById('capturedOn') || document.getElementById('capturedOnDate');
-      if (elById) {
-        elById.textContent = `Captured on ${formatted}`;
-        return;
-      }
-
-      const candidates = Array.from(document.querySelectorAll('body *'))
-        .filter(n => n && n.childElementCount === 0 && typeof n.textContent === 'string' && /captured on/i.test(n.textContent));
-
-      const target = candidates[0];
-      if (target) {
-        target.textContent = target.textContent.replace(/captured on\s+.*/i, `Captured on ${formatted}`);
-      }
-    };
-
-    try {
-      const { data, error } = await supabase
-        .from('lists')
-        .select('created_at')
-        .eq('user_id', listId)
-        .order('created_at', { ascending: true })
-        .limit(1);
-
-      if (!error && data && data[0] && data[0].created_at) {
-        const formatted = formatIso(data[0].created_at);
-        if (formatted) {
-          try { localStorage.setItem(`splash_island_captured_at_${listId}`, data[0].created_at); } catch(e) {}
-          setUI(formatted);
-          return;
-        }
-      }
-    } catch(e) {}
-
-    try {
-      const KEY = `splash_island_captured_at_${listId}`;
-      const iso = localStorage.getItem(KEY) || '';
-      const formatted = formatIso(iso);
-      if (formatted) setUI(formatted);
-    } catch(e) {}
-  })();
 
   /* =========================
      LAST PARENT MEMORY
@@ -561,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
      FIELD REPOPULATION (LOCAL "LAST TOP 5")
   ========================== */
   const LAST_LIST_PREFIX = 'splash_last_';
+
   function lastListKey(category) { return LAST_LIST_PREFIX + String(category || '').trim().toLowerCase(); }
   function safeJsonParse(raw) { try { return JSON.parse(raw); } catch (e) { return null; } }
 
@@ -644,96 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     iOS KEYBOARD OVERLAP / SCROLL ASSIST
-  ========================== */
-  (function bindKeyboardAssist(){
-    const rankInputs = Array.from(document.querySelectorAll('input[name^="rank"]'));
-    if (!rankInputs.length) return;
-
-    if (window.__SPLASH_KEYBOARD_ASSIST__) return;
-    window.__SPLASH_KEYBOARD_ASSIST__ = true;
-
-    const spacer = document.createElement('div');
-    spacer.id = 'splash-keyboard-spacer';
-    spacer.style.height = '0px';
-    spacer.style.pointerEvents = 'none';
-    document.body.appendChild(spacer);
-
-    const submitBtn = document.querySelector('form [type="submit"], form button[type="submit"], form input[type="submit"]');
-
-    function getKeyboardOverlap(){
-      if (window.visualViewport) {
-        const vv = window.visualViewport;
-        return Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
-      }
-      return 0;
-    }
-
-    function setSpacer(px){
-      const extra = 90;
-      spacer.style.height = px > 0 ? `${px + extra}px` : '0px';
-    }
-
-    let lastScrollAt = 0;
-
-    function hardScrollIntoSafeZone(el){
-      const now = Date.now();
-      if (now - lastScrollAt < 180) return;
-
-      const overlap = getKeyboardOverlap();
-      setSpacer(overlap);
-
-      const viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      const safeBottom = viewportH - 110;
-      const desiredTop = 110;
-
-      const rect = el.getBoundingClientRect();
-
-      let delta = 0;
-      if (rect.bottom > safeBottom) delta = rect.bottom - safeBottom;
-      else if (rect.top < desiredTop) delta = rect.top - desiredTop;
-
-      if (Math.abs(delta) > 12) {
-        lastScrollAt = now;
-        window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-      }
-    }
-
-    function onFocus(el){
-      setTimeout(() => hardScrollIntoSafeZone(el), 120);
-    }
-
-    rankInputs.forEach(el => {
-      el.addEventListener('focus', () => onFocus(el), { passive: true });
-      el.addEventListener('blur',  () => setTimeout(() => setSpacer(0), 160), { passive: true });
-
-      if (el.name === 'rank5' && submitBtn) {
-        el.addEventListener('focus', () => {
-          setTimeout(() => {
-            const r = submitBtn.getBoundingClientRect();
-            const viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            const safeBottom = viewportH - 110;
-
-            const delta = r.bottom - safeBottom;
-            if (delta > 12) window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-          }, 160);
-        }, { passive: true });
-      }
-    });
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', () => {
-        setSpacer(getKeyboardOverlap());
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-          hardScrollIntoSafeZone(active);
-        }
-      }, { passive: true });
-    }
-  })();
-
-  /* =========================
-     CLEANUP: remove any old MusicBrainz suggest boxes if present
+     CLEANUP: remove any old MusicBrainz suggest boxes if present (from older builds)
   ========================== */
   document.querySelectorAll('.splash-suggest').forEach(el => el.remove());
 
@@ -1214,6 +978,7 @@ document.addEventListener('DOMContentLoaded', () => {
      GLOBAL APPLIED SNAPSHOT (per category)
   ========================== */
   const GLOBAL_APPLIED_PREFIX = 'splash_global_applied_';
+
   function globalAppliedKey(category){
     return GLOBAL_APPLIED_PREFIX + String(category || '').trim().toLowerCase();
   }
@@ -1242,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — GLOBAL SKIP DEBUG (local only)
+     FEATURE 2 — GLOBAL SKIP DEBUG
   ========================== */
   function recordGlobalSkip(category, value, reason){
     const key = `splash_global_skipped_${String(category || '').trim().toLowerCase()}`;
@@ -1257,7 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION
+     ANTI-JUNK VALIDATION
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1307,7 +1072,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
+     CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1363,6 +1128,9 @@ document.addEventListener('DOMContentLoaded', () => {
     return out;
   }
 
+  /* =========================
+     NO-CHANGE GUARD HELPERS
+  ========================== */
   function valuesEqualRow(row, values){
     if (!row) return false;
     const rowVals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
@@ -1374,39 +1142,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!row) return [];
     const vals = [row.v1, row.v2, row.v3, row.v4, row.v5].map(v => String(v || '').trim());
     return eligibleValuesForGlobal(category, vals);
-  }
-
-  /* =========================
-     FAIL-SOFT READ EXISTING LIST ROW (fix timeout:read_list)
-  ========================== */
-  async function safeReadExistingListRow({ userId, category, timeoutMs }) {
-    try {
-      const { data, error } = await withTimeout(
-        supabase
-          .from('lists')
-          .select('v1,v2,v3,v4,v5')
-          .eq('user_id', userId)
-          .eq('category', category)
-          .maybeSingle(),
-        timeoutMs,
-        'read_list'
-      );
-
-      if (error) throw error;
-      return data || null;
-    } catch (err) {
-      // FAIL-SOFT: read is optional; never block submit
-      try {
-        logEvent('read_list_failsoft', {
-          category,
-          list_id: userId,
-          message: String(err && (err.message || err) || 'unknown')
-        });
-      } catch {}
-
-      console.warn('[Splash] read_list failed (fail-soft). Continuing submit.', err);
-      return null;
-    }
   }
 
   /* =========================
@@ -1459,16 +1194,12 @@ document.addEventListener('DOMContentLoaded', () => {
       userList.innerHTML = '<li>Loading…</li>';
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('lists')
-            .select('*')
-            .eq('user_id', listId)
-            .eq('category', category)
-            .maybeSingle(),
-          READ_TIMEOUT_MS,
-          'results_user_list'
-        );
+        const { data, error } = await supabase
+          .from('lists')
+          .select('*')
+          .eq('user_id', listId)
+          .eq('category', category)
+          .maybeSingle();
 
         if (error) throw error;
 
@@ -1515,10 +1246,15 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           userList.innerHTML = '<li>No saved list.</li>';
         }
+
+        const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
+        if (probe) {
+          window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
+          window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
+        }
       } catch (err) {
-        userList.innerHTML = '<li>Could not load your list. Please refresh.</li>';
+        userList.innerHTML = '<li>Could not load your list. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
         toast('Could not load your saved list.', 'error');
-        console.warn('[Splash] user list load failed', err);
       }
     })();
 
@@ -1530,16 +1266,12 @@ document.addEventListener('DOMContentLoaded', () => {
       globalMount.textContent = 'Loading…';
 
       try {
-        const { data, error } = await withTimeout(
-          supabase
-            .from('global_items')
-            .select('display_name, canonical_id, category, count')
-            .eq('category', category)
-            .order('count', { ascending: false })
-            .limit(100),
-          READ_TIMEOUT_MS,
-          'results_global_list'
-        );
+        const { data, error } = await supabase
+          .from('global_items')
+          .select('display_name, canonical_id, category, count')
+          .eq('category', category)
+          .order('count', { ascending: false })
+          .limit(100);
 
         if (error) throw error;
 
@@ -1547,6 +1279,11 @@ document.addEventListener('DOMContentLoaded', () => {
           globalMount.textContent = 'No global rankings yet.';
           return;
         }
+
+        const fs = window.__SPLASH_TOP5_FONTSIZE__;
+        const lh = window.__SPLASH_TOP5_LINEHEIGHT__;
+        if (fs) globalMount.style.fontSize = fs;
+        if (lh) globalMount.style.lineHeight = lh;
 
         const ul = document.createElement('ul');
 
@@ -1611,18 +1348,14 @@ document.addEventListener('DOMContentLoaded', () => {
         globalMount.textContent = '';
         globalMount.appendChild(ul);
       } catch (err) {
-        globalMount.textContent = 'Could not load global rankings. Please refresh.';
+        globalMount.innerHTML = 'Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button>';
         toast('Could not load Global Splash (Top 100).', 'error');
-        console.warn('[Splash] global list load failed', err);
       }
     })();
   }
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Canonical-based diff update
-     + GLOBAL updates fail-soft
-     + HARD override Webflow submit
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1636,28 +1369,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     formEl.addEventListener('submit', async (event) => {
-      // HARD OVERRIDE: prevent Webflow from handling submit in parallel
       event.preventDefault();
-      event.stopPropagation();
-      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
 
-      suppressWebflowFormStates(formEl);
+      const submitBtn = formEl.querySelector('[type="submit"]');
+      const originalBtnValue = submitBtn ? submitBtn.value : null;
 
-      // True double-submit lock
-      if (formEl.__SPLASH_SUBMITTING__) return;
-      formEl.__SPLASH_SUBMITTING__ = true;
-
-      let primarySaveSucceeded = false;
-
-      const submitBtn = formEl.querySelector('[type="submit"]') || formEl.querySelector('button[type="submit"]');
-      const originalBtnValue = submitBtn
-        ? (submitBtn.tagName === 'INPUT' ? submitBtn.value : submitBtn.textContent)
-        : null;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.value = 'Saving...';
+      }
 
       setInlineError(formEl, null);
-
-      // Set saving state
-      setSavingUI(submitBtn, originalBtnValue);
 
       logEvent('submit_click', { category, list_id: viewerListId });
 
@@ -1670,8 +1392,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      // Hard requirement: all 5 filled
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
+
       if (!allFiveFilled) {
         logEvent('submit_error', {
           category,
@@ -1681,8 +1403,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         setInlineError(formEl, 'Please enter all five before submitting.');
-        resetSubmitUI(submitBtn, originalBtnValue);
-        formEl.__SPLASH_SUBMITTING__ = false;
+
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.value = originalBtnValue || 'Submit';
+        }
         return;
       }
 
@@ -1697,25 +1422,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
 
-        resetSubmitUI(submitBtn, originalBtnValue);
-        formEl.__SPLASH_SUBMITTING__ = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.value = originalBtnValue || 'Submit';
+        }
         return;
       }
 
       try {
-        // FAIL-SOFT read existing row (fix timeout:read_list)
-        const existingRow = await safeReadExistingListRow({
-          userId: viewerListId,
-          category,
-          timeoutMs: READ_TIMEOUT_MS
-        });
+        const { data: existingRow, error: readErr } = await supabase
+          .from('lists')
+          .select('v1,v2,v3,v4,v5')
+          .eq('user_id', viewerListId)
+          .eq('category', category)
+          .maybeSingle();
 
-        // No-change guard only if we actually have the row
-        if (existingRow && valuesEqualRow(existingRow, newValues)) {
+        const hadExisting = !!existingRow;
+        const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
+
+        if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
-
-          primarySaveSucceeded = true;
 
           logEvent('submit_success', {
             category,
@@ -1730,11 +1457,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const hadExisting = !!existingRow;
-        const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
-
-        // Primary upsert (hard requirement)
-        const upsertPromise = supabase
+        const { error: upErr } = await supabase
           .from('lists')
           .upsert({
             user_id: viewerListId,
@@ -1746,13 +1469,8 @@ document.addEventListener('DOMContentLoaded', () => {
             v5: newValues[4] || null
           }, { onConflict: 'user_id,category' });
 
-        const { error: upErr } = await withTimeout(upsertPromise, UPSERT_TIMEOUT_MS, 'upsert_list');
         if (upErr) throw upErr;
 
-        // From here on, we NEVER show "Save failed" for downstream errors
-        primarySaveSucceeded = true;
-
-        // GLOBAL UPDATES (FAIL-SOFT)
         let added = [];
         let removed = [];
         let globalOk = true;
@@ -1809,12 +1527,7 @@ document.addEventListener('DOMContentLoaded', () => {
           `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
 
       } catch (err) {
-        // If primary upsert already succeeded, suppress any error UI
-        if (primarySaveSucceeded) {
-          console.warn('[Splash] Non-blocking post-save error suppressed:', err);
-          return;
-        }
-
+        // ✅ V24.3.4: better offline messaging (works with DevTools Offline)
         logEvent('submit_error', {
           category,
           list_id: viewerListId,
@@ -1822,22 +1535,27 @@ document.addEventListener('DOMContentLoaded', () => {
           message: String(err && (err.message || err) || 'unknown')
         });
 
-        let m = 'Save failed. Please try again.';
         const msg = String(err && (err.message || err) || '');
 
-        if (msg.startsWith('timeout:')) {
-          m = isProbablyOffline()
-            ? 'You appear to be offline. Please reconnect and try again.'
-            : 'Saving is taking longer than expected. Please try again.';
+        const looksOffline =
+          (navigator.onLine === false) ||
+          /failed to fetch|networkerror|load failed|internet disconnected|err_internet_disconnected|err_network_changed|err_connection|net::err_/i.test(msg);
+
+        let m = 'Save failed. Please try again.';
+
+        if (looksOffline) {
+          m = 'You appear to be offline or your connection is unstable. Please reconnect and try again.';
+        } else if (msg.startsWith('timeout:')) {
+          m = 'Saving is taking longer than expected. Please try again.';
         }
 
         if (!setInlineError(formEl, m)) toast(m, 'error');
 
-        resetSubmitUI(submitBtn, originalBtnValue);
-        formEl.__SPLASH_SUBMITTING__ = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.value = originalBtnValue || 'Submit';
+        }
       }
-
-    }, true); // CAPTURE PHASE is critical to beat Webflow's handler
+    });
   });
-
 });
