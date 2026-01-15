@@ -1,10 +1,13 @@
-// Archived reference snapshot — updated
-// SPLASH FOOTER JS — V24.2 (iOS Tap/Dim Fix + Placeholder Reapply)
-// BASELINE: V24.1 (Overlay Hard-Kill + Placeholder Reapply)
-// Fixes:
-// 1) iOS “dimmed + unclickable” regression: remove touchAction locking, use fixed-scroll lock, and make sheet inert when hidden
-// 2) Keep placeholder reapply after Webflow pass + on focus
-// Notes: No functional change to Supabase writes, analytics, link_clicks, global list, or anti-junk logic.
+// Archived reference snapshot — no functional change
+// SPLASH FOOTER JS — V24.0 (Beta Error Handling: Toast + Retry, No Alerts)
+// BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
+// Adds (beta-safe):
+//  - Fail-soft toast UI (non-blocking)
+//  - Inline form error helper (prefers .form-error-text over alerts)
+//  - Results page missing-category guard
+//  - Retry affordances for user list + global list load failures
+//  - ui_error analytics events (fail-silent) for load failures
+// NOTE: No refactors. Core logic unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -22,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
+     - session_id is uuid NOT NULL → MUST always be valid UUID
+     - list_id is uuid nullable → only send if valid UUID else null
+     - Never blocks UX, queue + flush in background
   ========================== */
   const ANALYTICS_SESSION_KEY = 'splash_session_id';
   const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
@@ -29,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const ANALYTICS_FLUSH_CHUNK = 25;
 
   function uuidv4Fallback(){
+    // RFC4122-ish v4 fallback using Math.random (sufficient for session IDs)
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = Math.random() * 16 | 0;
       const v = (c === 'x') ? r : ((r & 0x3) | 0x8);
@@ -53,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       return sid;
     } catch {
+      // Must still return a UUID because session_id is uuid NOT NULL
       return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
     }
   }
@@ -70,23 +78,30 @@ document.addEventListener('DOMContentLoaded', () => {
   function writeQueue(arr){
     try {
       localStorage.setItem(ANALYTICS_QUEUE_KEY, JSON.stringify(arr));
-    } catch {}
+    } catch {
+      // If storage is full or blocked, do nothing (fail-silent).
+    }
   }
 
   function enqueueEvent(payload){
     try {
       const q = readQueue();
       q.push(payload);
+
+      // Trim oldest if over cap
       if (q.length > ANALYTICS_QUEUE_MAX) {
         q.splice(0, q.length - ANALYTICS_QUEUE_MAX);
       }
       writeQueue(q);
-    } catch {}
+    } catch {
+      // silent
+    }
   }
 
   let __FLUSHING__ = false;
 
   async function postAnalyticsBatchKeepalive(batch){
+    // Supabase REST insert with keepalive to survive navigation better
     const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
     const res = await fetch(url, {
       method: 'POST',
@@ -100,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
       keepalive: true
     });
 
+    // 201/204 are typical for return=minimal inserts
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
@@ -114,19 +130,24 @@ document.addEventListener('DOMContentLoaded', () => {
       let q = readQueue();
       if (!q.length) return;
 
+      // Send in chunks; remove only on success
       while (q.length) {
         const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
+
         await postAnalyticsBatchKeepalive(batch);
+
+        // Remove sent
         q = q.slice(batch.length);
         writeQueue(q);
       }
     } catch {
-      // leave queue intact
+      // leave queue intact for next attempt
     } finally {
       __FLUSHING__ = false;
     }
   }
 
+  // Flush on load and opportunistically
   flushQueue();
   setTimeout(flushQueue, 1500);
   setInterval(flushQueue, 15000);
@@ -154,58 +175,183 @@ document.addEventListener('DOMContentLoaded', () => {
 
       enqueueEvent(payload);
       flushQueue();
-    } catch {}
+    } catch {
+      // silent by design
+    }
   }
 
   /* =========================
-     LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+     BETA ERROR UI (FAIL-SOFT)
+     - Non-blocking toast + optional inline messages
+     - No alerts by default
   ========================== */
-  async function insertLinkClickKeepalive(row){
+  function ensureToastHost(){
+    let host = document.getElementById('splash-toast-host');
+    if (host) return host;
+
+    host = document.createElement('div');
+    host.id = 'splash-toast-host';
+    host.style.position = 'fixed';
+    host.style.left = '12px';
+    host.style.right = '12px';
+    host.style.bottom = '12px';
+    host.style.zIndex = '99999';
+    host.style.display = 'flex';
+    host.style.flexDirection = 'column';
+    host.style.gap = '10px';
+    host.style.pointerEvents = 'none';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function toast(message, kind = 'error', ttl = 4200){
     try {
-      const payload = {
-        category: row.category || null,
-        canonical_id: row.canonical_id || null,
-        display_name: row.display_name || null,
+      const host = ensureToastHost();
+      const card = document.createElement('div');
+      card.setAttribute('role', 'status');
+      card.style.pointerEvents = 'auto';
+      card.style.padding = '12px 14px';
+      card.style.borderRadius = '12px';
+      card.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)';
+      card.style.backdropFilter = 'blur(8px)';
+      card.style.display = 'flex';
+      card.style.alignItems = 'center';
+      card.style.justifyContent = 'space-between';
+      card.style.gap = '12px';
+      card.style.fontSize = '14px';
 
-        link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
-        link_label: row.link_label || null,
-        source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
-
-        page: row.page || (window.location.pathname || null),
-        url: row.url || null,
-
-        list_id: uuidOrNull(row.list_id),
-        session_id: getSessionId()
-      };
-
-      if (!payload.category) return;
-      if (!payload.link_slot) return;
-      if (!payload.link_label) return;
-      if (!payload.source) return;
-      if (!payload.url) return;
-
-      const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_PUBLISHABLE_KEY,
-          'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(payload),
-        keepalive: true
-      });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
+      // conservative colors (doesn't assume CSS tokens)
+      if (kind === 'success') {
+        card.style.background = 'rgba(20, 110, 60, 0.92)';
+        card.style.color = '#fff';
+      } else if (kind === 'info') {
+        card.style.background = 'rgba(20, 50, 90, 0.92)';
+        card.style.color = '#fff';
+      } else {
+        card.style.background = 'rgba(120, 35, 35, 0.92)';
+        card.style.color = '#fff';
       }
-    } catch (e) {
-      console.error('[Splash link_clicks] exception', e);
+
+      const msg = document.createElement('div');
+      msg.textContent = String(message || 'Something went wrong.');
+      msg.style.flex = '1 1 auto';
+
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.style.border = 'none';
+      x.style.background = 'transparent';
+      x.style.color = 'inherit';
+      x.style.fontSize = '18px';
+      x.style.cursor = 'pointer';
+      x.addEventListener('click', () => card.remove());
+
+      card.appendChild(msg);
+      card.appendChild(x);
+
+      host.appendChild(card);
+
+      setTimeout(() => {
+        try { card.remove(); } catch(e) {}
+      }, ttl);
+    } catch(e) {
+      // fail-silent: never break UX
     }
   }
+
+  function setInlineError(formEl, msg){
+    try {
+      const errorTextEl = formEl && formEl.querySelector && formEl.querySelector('.form-error-text');
+      if (!errorTextEl) return false;
+
+      if (!msg) {
+        errorTextEl.style.display = 'none';
+        errorTextEl.setAttribute('aria-hidden', 'true');
+        return true;
+      }
+
+      errorTextEl.textContent = String(msg);
+      errorTextEl.style.display = 'block';
+      errorTextEl.setAttribute('aria-hidden', 'false');
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function reportLoadFailure(context, err){
+    try {
+      logEvent('ui_error', {
+        category: (urlParams.get('category') || '').trim().toLowerCase() || null,
+        list_id: viewerListId,
+        context,
+        message: String(err && (err.message || err) || 'unknown')
+      });
+    } catch(e) {}
+  }
+
+/* =========================
+   LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+   Table: public.link_clicks
+   Constraints:
+     - link_slot must be 'A' or 'B'
+     - source must be 'user_top5' or 'global_top100'
+========================== */
+async function insertLinkClickKeepalive(row){
+  try {
+    const payload = {
+      category: row.category || null,
+      canonical_id: row.canonical_id || null,
+      display_name: row.display_name || null,
+
+      // constraints
+      link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
+      link_label: row.link_label || null,
+      source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
+
+      page: row.page || (window.location.pathname || null),
+      url: row.url || null,
+
+      // keep list_id clean (your analytics uses uuidOrNull too)
+      list_id: uuidOrNull(row.list_id),
+
+      // IMPORTANT: enables join to analytics_events
+      session_id: getSessionId()
+    };
+
+    // Hard guard against constraint failure
+    if (!payload.category) return;
+    if (!payload.link_slot) return;
+    if (!payload.link_label) return;
+    if (!payload.source) return;
+    if (!payload.url) return;
+
+    const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_PUBLISHABLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
+    } else {
+      console.log('[Splash link_clicks] inserted', payload);
+    }
+
+  } catch (e) {
+    console.error('[Splash link_clicks] exception', e);
+  }
+}
 
   /* =========================
      PARENT ROUTES + LABELS
@@ -295,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
     : ((islandListId || viewerListId) === viewerListId);
 
   /* =========================
-     QW3 — VISIT
+     QW3 — VISIT (one per page load)
   ========================== */
   const visitCategory = (categoryFromQuery || '').trim().toLowerCase() || null;
   logEvent('visit', {
@@ -466,69 +612,6 @@ document.addEventListener('DOMContentLoaded', () => {
         inputs[idx].dataset.splashPrefilled = '1';
       }
     });
-  }
-
-  /* =========================
-     EXAMPLE PLACEHOLDERS (ALL CATEGORIES)
-     - Overrides generic placeholders ("Song 1", "Actor 3", etc.)
-     - Does NOT override existing values
-     - Re-applies after Webflow pass + on focus
-  ========================== */
-  function examplePlaceholderForCategory(category){
-    const parent = getParentFromCategory(category);
-    const sub = getSubKey(category);
-
-    if (parent === 'music') {
-      if (sub === 'albums')  return 'e.g., Back in Black - AC/DC';
-      if (sub === 'songs')   return 'e.g., The Chain - Fleetwood Mac';
-      if (sub === 'artists') return 'e.g., Stevie Ray Vaughan';
-      if (sub === 'genres')  return 'e.g., Delta Blues';
-      return 'e.g., Song/Album - Artist';
-    }
-
-    if (parent === 'movies') return 'e.g., The Godfather (1972)';
-    if (parent === 'tv')     return 'e.g., Breaking Bad';
-    if (parent === 'books')  return 'e.g., The Shining - Stephen King';
-    if (parent === 'games')  return 'e.g., The Last of Us (PS3)';
-    if (parent === 'travel') return 'e.g., Kyoto, Japan';
-    if (parent === 'food')   return 'e.g., Spaghetti Carbonara';
-    if (parent === 'cars')   return 'e.g., 1971 Ford XY Falcon';
-    if (parent === 'people') return 'e.g., David Bowie';
-    return 'e.g., Item name';
-  }
-
-  function applyExamplePlaceholders(formEl, category){
-    try {
-      const example = examplePlaceholderForCategory(category);
-      const inputs = getRankInputs(formEl);
-
-      const isGeneric = (ph) => {
-        const p = String(ph || '').trim();
-        if (!p) return true;
-        if (/^[A-Za-z]+\s\d+$/.test(p)) return true;
-        if (/^(song|album|artist|actor|movie|book|game|item|rank)\s\d+$/i.test(p)) return true;
-        return false;
-      };
-
-      inputs.forEach((inp) => {
-        // never override actual user-entered values
-        if (String(inp.value || '').trim()) return;
-
-        const ph = inp.getAttribute('placeholder') || '';
-        if (isGeneric(ph)) {
-          inp.setAttribute('placeholder', example);
-        }
-
-        if (!inp.__SPLASH_PH_FIX__) {
-          inp.__SPLASH_PH_FIX__ = true;
-          inp.addEventListener('focus', () => {
-            if (String(inp.value || '').trim()) return;
-            const ph2 = inp.getAttribute('placeholder') || '';
-            if (isGeneric(ph2)) inp.setAttribute('placeholder', example);
-          }, { passive: true });
-        }
-      });
-    } catch(e){}
   }
 
   /* =========================
@@ -967,49 +1050,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     OPEN DIALOG (CREATE ONCE + LOCK SCROLL) — iOS SAFE
+     OPEN DIALOG (CREATE ONCE + LOCK SCROLL)
   ========================== */
-  const __LOCK_KEY__ = '__diScrollLockV2';
-  function lockScroll(){
-    try {
-      const b = document.body;
-
-      if (b.dataset[__LOCK_KEY__] === '1') return;
-      b.dataset[__LOCK_KEY__] = '1';
-
-      const y = window.scrollY || window.pageYOffset || 0;
-      b.dataset.__diScrollY = String(y);
-
-      // iOS-safe: freeze body position instead of touchAction:none
-      b.style.position = 'fixed';
-      b.style.top = `-${y}px`;
-      b.style.left = '0';
-      b.style.right = '0';
-      b.style.width = '100%';
-    } catch(e){}
-  }
-
-  function unlockScroll(){
-    try {
-      const b = document.body;
-      const wasLocked = b.dataset[__LOCK_KEY__] === '1';
-      const y = parseInt(b.dataset.__diScrollY || '0', 10) || 0;
-
-      b.style.position = '';
-      b.style.top = '';
-      b.style.left = '';
-      b.style.right = '';
-      b.style.width = '';
-
-      delete b.dataset.__diScrollY;
-      delete b.dataset[__LOCK_KEY__];
-
-      if (wasLocked) {
-        window.scrollTo(0, y);
-      }
-    } catch(e){}
-  }
-
   function ensureOpenDialog(){
     let sheet = document.querySelector('.di-open-sheet');
     if (sheet) return sheet;
@@ -1017,10 +1059,6 @@ document.addEventListener('DOMContentLoaded', () => {
     sheet = document.createElement('div');
     sheet.className = 'di-open-sheet';
     sheet.setAttribute('aria-hidden','true');
-
-    // Hidden must be inert (prevents iOS tap-blocking)
-    sheet.style.display = 'none';
-    sheet.style.pointerEvents = 'none';
 
     sheet.innerHTML = `
       <div class="di-open-backdrop"></div>
@@ -1064,12 +1102,43 @@ document.addEventListener('DOMContentLoaded', () => {
     return sheet;
   }
 
+  function lockScroll(){
+    const b = document.body;
+    const h = document.documentElement;
+
+    if (!b.dataset.__diPrevOverflow) b.dataset.__diPrevOverflow = b.style.overflow || '';
+    if (!b.dataset.__diPrevTouchAction) b.dataset.__diPrevTouchAction = b.style.touchAction || '';
+    if (!b.dataset.__diPrevHtmlOverflow) b.dataset.__diPrevHtmlOverflow = h.style.overflow || '';
+
+    b.style.overflow = 'hidden';
+    h.style.overflow = 'hidden';
+    b.style.touchAction = 'none';
+  }
+
+  function unlockScroll(){
+    const b = document.body;
+    const h = document.documentElement;
+
+    const prevOverflow = b.dataset.__diPrevOverflow;
+    const prevTouch = b.dataset.__diPrevTouchAction;
+    const prevHtmlOverflow = b.dataset.__diPrevHtmlOverflow;
+
+    b.style.overflow = (prevOverflow !== undefined) ? prevOverflow : '';
+    b.style.touchAction = (prevTouch !== undefined) ? prevTouch : '';
+    h.style.overflow = (prevHtmlOverflow !== undefined) ? prevHtmlOverflow : '';
+
+    delete b.dataset.__diPrevOverflow;
+    delete b.dataset.__diPrevTouchAction;
+    delete b.dataset.__diPrevHtmlOverflow;
+  }
+
   function openInNewTab(url){
     const u = String(url || '').trim();
     if (!u || u === '#') return;
     window.open(u, '_blank', 'noopener,noreferrer');
   }
 
+  // UPDATED: now accepts meta (category/source/list_id/display/canonical)
   function showOpenDialog(links, meta){
     const sheet = ensureOpenDialog();
     const body = sheet.querySelector('#diOpenBody');
@@ -1089,13 +1158,14 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.textContent = label || 'Open';
 
       btn.addEventListener('click', () => {
+        // Log first (non-blocking), then open
         insertLinkClickKeepalive({
           category: meta?.category || null,
           canonical_id: meta?.canonical_id || null,
           display_name: meta?.display_name || null,
-          link_slot: slot,
+          link_slot: slot, // 'A' or 'B'
           link_label: String(label || ''),
-          source: meta?.source || null,
+          source: meta?.source || null, // 'user_top5' or 'global_top100'
           page: meta?.page || (window.location.pathname || ''),
           url: String(url || ''),
           list_id: meta?.list_id || null
@@ -1121,36 +1191,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!aUrl && !bUrl) body.textContent = 'No links available.';
 
     lockScroll();
-
     sheet.style.display = 'block';
-    sheet.style.pointerEvents = 'auto';
     sheet.setAttribute('aria-hidden','false');
   }
 
   function hideOpenDialog() {
     const sheet = document.querySelector('.di-open-sheet');
-    if (sheet) {
-      sheet.setAttribute('aria-hidden', 'true');
-      sheet.style.pointerEvents = 'none';
-      sheet.style.display = 'none';
-    }
+    if (!sheet) { unlockScroll(); return; }
+    sheet.style.display = 'none';
+    sheet.setAttribute('aria-hidden', 'true');
     unlockScroll();
   }
 
-  // HARD KILL any stuck overlays on load (prevents dimmed / unclickable screen on iOS)
-  (function forceCloseOverlaysOnLoad(){
-    try {
-      hideOpenDialog();
-
-      // Defensive: clear any legacy fixed locks if they existed
-      document.body.style.position = '';
-      document.body.style.top = '';
-      document.body.style.left = '';
-      document.body.style.right = '';
-      document.body.style.width = '';
-    } catch(e) {}
-  })();
-
+  // UPDATED: reads meta and passes into dialog
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest && e.target.closest('[data-di-open]');
     if (!btn) return;
@@ -1194,6 +1247,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') hideOpenDialog();
   });
 
+  /* =========================
+     SHARED BUTTON STYLE
+  ========================== */
   function styleOpenButton(btn) {
     btn.classList.add('di-action-pill');
     btn.style.flex = '0 0 auto';
@@ -1356,7 +1412,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — GLOBAL SKIP DEBUG
+     FEATURE 2 — GLOBAL SKIP DEBUG (local only; no UX impact)
   ========================== */
   function recordGlobalSkip(category, value, reason){
     const key = `splash_global_skipped_${String(category || '').trim().toLowerCase()}`;
@@ -1371,7 +1427,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     V22.8 — ANTI-JUNK VALIDATION
+     V22.8 — ANTI-JUNK VALIDATION (keeps freedom; blocks obvious garbage only)
   ========================== */
   function isProbablyUrlOrEmail(s){
     const t = String(s || '').trim().toLowerCase();
@@ -1421,7 +1477,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
-     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY
+     FEATURE 2 — CATEGORY PLAUSIBILITY → GLOBAL ELIGIBILITY (light-touch)
   ========================== */
   function looksLikePersonName(s){
     const t = String(s || '').trim();
@@ -1518,6 +1574,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setResultsCopy();
 
+    // Missing category guard (beta)
+    const __cat = (urlParams.get('category') || '').trim();
+    if (!__cat) {
+      toast('Missing category. Please go back and choose a category again.', 'error', 6500);
+
+      const userList = document.getElementById('userList');
+      const globalMount = document.getElementById('globalList');
+
+      if (userList) userList.innerHTML = '<li>No category selected.</li>';
+      if (globalMount) globalMount.textContent = 'No category selected.';
+      return;
+    }
+
+    // QW3 — results_view
     logEvent('results_view', {
       category: (urlParams.get('category') || '').trim().toLowerCase() || null,
       list_id: viewerListId
@@ -1567,10 +1637,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!v) return;
 
             const li = document.createElement('li');
-            li.style.display = 'flex';
-            li.style.alignItems = 'center';
-            li.style.justifyContent = 'space-between';
-            li.style.gap = '12px';
+            styleRowLi(li);
 
             const textSpan = document.createElement('span');
             textSpan.textContent = v;
@@ -1585,6 +1652,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
+            // meta for link_clicks
             const meta = {
               category: category,
               canonical_id: canonicalFromDisplay(v),
@@ -1595,8 +1663,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
-            openBtn.classList.add('di-action-pill');
-            openBtn.style.flex = '0 0 auto';
+            styleOpenButton(openBtn);
 
             li.appendChild(textSpan);
             li.appendChild(openBtn);
@@ -1613,8 +1680,24 @@ document.addEventListener('DOMContentLoaded', () => {
           window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
           window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
         }
-      } catch {
-        userList.innerHTML = '<li>Could not load.</li>';
+      } catch (err) {
+        reportLoadFailure('user_list_load', err);
+
+        userList.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Could not load your list. ';
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = 'Retry';
+        retry.style.marginLeft = '8px';
+        retry.style.cursor = 'pointer';
+        retry.addEventListener('click', () => window.location.reload());
+
+        li.appendChild(retry);
+        userList.appendChild(li);
+
+        toast('Could not load your saved list.', 'error');
       }
     })();
 
@@ -1652,10 +1735,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const count = Number(row.count || 0);
 
           const li = document.createElement('li');
-          li.style.display = 'flex';
-          li.style.alignItems = 'center';
-          li.style.justifyContent = 'space-between';
-          li.style.gap = '12px';
+          styleRowLi(li);
 
           const left = document.createElement('div');
           left.className = 'di-g-left';
@@ -1688,6 +1768,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
+          // meta for link_clicks
           const meta = {
             category: category,
             canonical_id: canonicalFromDisplay(label),
@@ -1698,8 +1779,7 @@ document.addEventListener('DOMContentLoaded', () => {
           };
           openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
-          openBtn.classList.add('di-action-pill');
-          openBtn.style.flex = '0 0 auto';
+          styleOpenButton(openBtn);
 
           right.appendChild(countEl);
           right.appendChild(openBtn);
@@ -1712,28 +1792,35 @@ document.addEventListener('DOMContentLoaded', () => {
         globalMount.textContent = '';
         globalMount.appendChild(ul);
       } catch (err) {
-        globalMount.textContent = 'Could not load global rankings.';
+        reportLoadFailure('global_list_load', err);
         console.error('[Splash] Global list load failed:', err);
+
+        globalMount.textContent = '';
+        const wrap = document.createElement('div');
+        wrap.textContent = 'Could not load global rankings. ';
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = 'Retry';
+        retry.style.marginLeft = '8px';
+        retry.style.cursor = 'pointer';
+        retry.addEventListener('click', () => window.location.reload());
+
+        wrap.appendChild(retry);
+        globalMount.appendChild(wrap);
+
+        toast('Could not load Global Splash (Top 100).', 'error');
       }
     })();
   }
 
   /* =========================
-     WEBFLOW FORM UI SUPPRESSION
-  ========================== */
-  function hideWebflowFormMessages(formEl){
-    try {
-      const wrap = formEl.closest('.w-form') || formEl.parentElement;
-      if (!wrap) return;
-      const done = wrap.querySelector('.w-form-done');
-      const fail = wrap.querySelector('.w-form-fail');
-      if (done) done.style.display = 'none';
-      if (fail) fail.style.display = 'none';
-    } catch(e){}
-  }
-
-  /* =========================
      FORM SUBMISSION (OVERWRITE)
+     + Predict bind for Music Albums
+     + Canonical-based diff update
+     + Global diff baseline from:
+        - localStorage snapshot if present
+        - otherwise Supabase existing row
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
@@ -1741,12 +1828,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const category = (formEl.getAttribute('data-category') || 'items').trim().toLowerCase();
 
     applyLastListToForm(formEl);
-    applyExamplePlaceholders(formEl, category);
-    hideWebflowFormMessages(formEl);
-
-    // Re-apply placeholders after Webflow finishes its own pass
-    setTimeout(() => applyExamplePlaceholders(formEl, category), 300);
-    setTimeout(() => applyExamplePlaceholders(formEl, category), 1200);
 
     if (isAlbumsCategory(category)) {
       getRankInputs(formEl).forEach(inp => {
@@ -1755,11 +1836,8 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // IMPORTANT: capture mode (true) ensures we intercept before Webflow.
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
-      event.stopImmediatePropagation();
-      hideWebflowFormMessages(formEl);
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? submitBtn.value : null;
@@ -1769,6 +1847,10 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.value = 'Saving...';
       }
 
+      // clear any previous inline error on each attempt
+      setInlineError(formEl, null);
+
+      // QW3 — submit_click
       logEvent('submit_click', { category, list_id: viewerListId });
 
       const parent = getParentFromCategory(category);
@@ -1780,23 +1862,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       saveLastList(category, newValues);
 
-      const errorTextEl = formEl.querySelector('.form-error-text');
-
-      const hideFormError = () => {
-        if (!errorTextEl) return;
-        errorTextEl.style.display = 'none';
-        errorTextEl.setAttribute('aria-hidden', 'true');
-      };
-
-      const showFormError = (msg) => {
-        if (!errorTextEl) return;
-        errorTextEl.textContent = msg || 'Please enter all five before submitting.';
-        errorTextEl.style.display = 'block';
-        errorTextEl.setAttribute('aria-hidden', 'false');
-      };
-
-      hideFormError();
-
+      // =========================
+      // HARD REQUIREMENT: ALL 5 FILLED (shows inline message; no browser tooltip)
+      // =========================
       const allFiveFilled = newValues.every(v => String(v || '').trim().length > 0);
 
       if (!allFiveFilled) {
@@ -1807,8 +1875,7 @@ document.addEventListener('DOMContentLoaded', () => {
           message: 'Not all five fields filled'
         });
 
-        showFormError('Please enter all five before submitting.');
-        hideWebflowFormMessages(formEl);
+        setInlineError(formEl, 'Please enter all five before submitting.');
 
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1826,8 +1893,8 @@ document.addEventListener('DOMContentLoaded', () => {
           message: verdict.msg
         });
 
-        alert(verdict.msg);
-        hideWebflowFormMessages(formEl);
+        // Prefer inline error; fall back to toast
+        if (!setInlineError(formEl, verdict.msg)) toast(verdict.msg, 'error');
 
         if (submitBtn) {
           submitBtn.disabled = false;
@@ -1847,6 +1914,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hadExisting = !!existingRow;
         const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
 
+        // No-change submit guard
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNew = eligibleValuesForGlobal(category, newValues);
           saveGlobalApplied(category, eligibleNew);
@@ -1864,6 +1932,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
+        // Upsert the latest list (always)
         const { error: upErr } = await supabase
           .from('lists')
           .upsert({
@@ -1878,14 +1947,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (upErr) throw upErr;
 
+        // Baseline selection (prevents drift)
         const appliedOld = loadGlobalApplied(category);
         const oldValuesForGlobal = appliedOld
           ? appliedOld
           : eligibleFromRow(category, existingRow);
 
         const eligibleNew = eligibleValuesForGlobal(category, newValues);
+
         const { added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew);
 
+        // item_changed only when a saved list actually changes
         if (changed) {
           logEvent('item_changed', {
             category,
@@ -1921,15 +1993,14 @@ document.addEventListener('DOMContentLoaded', () => {
           message: String(err && (err.message || err) || 'unknown')
         });
 
-        alert(`Save failed: ${err.message || err}`);
-        hideWebflowFormMessages(formEl);
+        const m = 'Save failed. Please try again.';
+        if (!setInlineError(formEl, m)) toast(m, 'error');
 
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
         }
       }
-    }, true);
+    });
   });
-
 });
