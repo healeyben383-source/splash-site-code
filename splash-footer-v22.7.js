@@ -1,10 +1,10 @@
-// Archived reference snapshot — functional change (offline error messaging hardened)
-// SPLASH FOOTER JS — V24.3.4 (Beta Error Handling: better offline messaging incl. DevTools Offline)
-// BASELINE: V24.3.3 (bc815bf)
+// Archived reference snapshot — functional change (analytics schema-safe + 4xx-drop flush)
+// SPLASH FOOTER JS — V24.3.5 (Beta Error Handling + Analytics Hardening)
+// BASELINE: V24.3.4
 // Fixes:
-//  - When DevTools Network = Offline, browser may still report navigator.onLine=true
-//  - We now detect network-type fetch errors and show a connection-specific message
-//  - Button still re-enables and retry works as before
+//  - analytics_events insert no longer sends non-existent columns (prevents 400 Bad Request)
+//  - 4xx responses drop queued analytics events to prevent infinite retry spam
+//  - Analytics remains fail-soft and never blocks UX
 // Keeps everything else unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
+     NOTE: analytics_events table currently supports: event_name, page (plus id/created_at)
+           We therefore only send {event_name, page}. All meta stays client-side only.
   ========================== */
   const ANALYTICS_SESSION_KEY = 'splash_session_id';
   const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
@@ -83,8 +85,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let __FLUSHING__ = false;
 
+  // ✅ Schema-safe analytics payload: ONLY { event_name, page }
+  function toAnalyticsRow(raw){
+    const ev = String(raw && raw.event_name ? raw.event_name : '').trim();
+    const page = String((raw && raw.page) ? raw.page : (window.location.pathname || '/')).trim() || '/';
+    if (!ev) return null;
+    return { event_name: ev, page };
+  }
+
   async function postAnalyticsBatchKeepalive(batch){
     const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
+
+    // build sanitized batch
+    const safeBatch = [];
+    for (const b of (batch || [])) {
+      const row = toAnalyticsRow(b);
+      if (row) safeBatch.push(row);
+    }
+    if (!safeBatch.length) return;
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -93,13 +112,17 @@ document.addEventListener('DOMContentLoaded', () => {
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
-      body: JSON.stringify(batch),
+      body: JSON.stringify(safeBatch),
       keepalive: true
     });
 
     if (!res.ok) {
+      // IMPORTANT: 4xx (schema/policy/payload) is not retryable; drop to prevent infinite loops.
+      const status = res.status;
       const txt = await res.text().catch(() => '');
-      throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
+      const err = new Error(`analytics insert failed: ${status} ${txt || ''}`.trim());
+      err.__SPLASH_HTTP_STATUS__ = status;
+      throw err;
     }
   }
 
@@ -113,9 +136,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
       while (q.length) {
         const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
-        await postAnalyticsBatchKeepalive(batch);
-        q = q.slice(batch.length);
-        writeQueue(q);
+
+        try {
+          await postAnalyticsBatchKeepalive(batch);
+          q = q.slice(batch.length);
+          writeQueue(q);
+        } catch (e) {
+          const status = e && e.__SPLASH_HTTP_STATUS__;
+
+          // ✅ Drop on any 4xx to avoid retry spam
+          if (status >= 400 && status < 500) {
+            q = q.slice(batch.length);
+            writeQueue(q);
+            // fail-silent: do not console.error by default (beta stability)
+            continue;
+          }
+
+          // leave queue intact for retry (network/5xx/etc.)
+          break;
+        }
       }
     } catch {
       // leave queue intact
@@ -138,14 +177,19 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       if (!event_name) return;
 
+      // ✅ Only store what analytics_events can accept
+      // Keep meta client-side only (if you ever add columns later, we can extend safely)
       const payload = {
         event_name,
-        page: window.location.pathname || '',
-        category: meta.category || null,
-        list_id: uuidOrNull(meta.list_id),
-        session_id: getSessionId(),
-        meta
+        page: window.location.pathname || '/'
       };
+
+      // keep meta for future debugging without sending to Supabase
+      // (non-breaking, stays in queue but is stripped in toAnalyticsRow)
+      payload.__meta = meta || {};
+
+      // ensure session exists (still useful for other tables like link_clicks)
+      getSessionId();
 
       enqueueEvent(payload);
       flushQueue();
@@ -1356,6 +1400,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
+     (UNCHANGED from your RAW, including V24.3.4 offline-aware messaging)
   ========================== */
   document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
