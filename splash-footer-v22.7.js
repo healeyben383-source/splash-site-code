@@ -1,13 +1,9 @@
-// Archived reference snapshot — no functional change
-// SPLASH FOOTER JS — V24.0 (Beta Error Handling: Toast + Retry, No Alerts)
-// BASELINE: V23.9 (Analytics Locked + Link Clicks Fixed)
-// Adds (beta-safe):
-//  - Fail-soft toast UI (non-blocking)
-//  - Inline form error helper (prefers .form-error-text over alerts)
-//  - Results page missing-category guard
-//  - Retry affordances for user list + global list load failures
-//  - ui_error analytics events (fail-silent) for load failures
-// NOTE: No refactors. Core logic unchanged.
+// Archived reference snapshot — functional change (MusicBrainz removed)
+// SPLASH FOOTER JS — V24.1 (Beta Error Handling: Toast + Retry, No Alerts) — NO MUSICBRAINZ
+// BASELINE: V24.0
+// Removes:
+//  - MusicBrainz predictive search + suggestion UI (albums only)
+// Keeps everything else unchanged.
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -291,67 +287,67 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch(e) {}
   }
 
-/* =========================
-   LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
-   Table: public.link_clicks
-   Constraints:
-     - link_slot must be 'A' or 'B'
-     - source must be 'user_top5' or 'global_top100'
-========================== */
-async function insertLinkClickKeepalive(row){
-  try {
-    const payload = {
-      category: row.category || null,
-      canonical_id: row.canonical_id || null,
-      display_name: row.display_name || null,
+  /* =========================
+     LINK CLICKS — keepalive insert (constraint-safe; fail-silent)
+     Table: public.link_clicks
+     Constraints:
+       - link_slot must be 'A' or 'B'
+       - source must be 'user_top5' or 'global_top100'
+  ========================== */
+  async function insertLinkClickKeepalive(row){
+    try {
+      const payload = {
+        category: row.category || null,
+        canonical_id: row.canonical_id || null,
+        display_name: row.display_name || null,
 
-      // constraints
-      link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
-      link_label: row.link_label || null,
-      source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
+        // constraints
+        link_slot: (row.link_slot === 'A' || row.link_slot === 'B') ? row.link_slot : null,
+        link_label: row.link_label || null,
+        source: (row.source === 'user_top5' || row.source === 'global_top100') ? row.source : null,
 
-      page: row.page || (window.location.pathname || null),
-      url: row.url || null,
+        page: row.page || (window.location.pathname || null),
+        url: row.url || null,
 
-      // keep list_id clean (your analytics uses uuidOrNull too)
-      list_id: uuidOrNull(row.list_id),
+        // keep list_id clean (your analytics uses uuidOrNull too)
+        list_id: uuidOrNull(row.list_id),
 
-      // IMPORTANT: enables join to analytics_events
-      session_id: getSessionId()
-    };
+        // IMPORTANT: enables join to analytics_events
+        session_id: getSessionId()
+      };
 
-    // Hard guard against constraint failure
-    if (!payload.category) return;
-    if (!payload.link_slot) return;
-    if (!payload.link_label) return;
-    if (!payload.source) return;
-    if (!payload.url) return;
+      // Hard guard against constraint failure
+      if (!payload.category) return;
+      if (!payload.link_slot) return;
+      if (!payload.link_label) return;
+      if (!payload.source) return;
+      if (!payload.url) return;
 
-    const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
+      const endpoint = `${SUPABASE_URL}/rest/v1/link_clicks`;
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_PUBLISHABLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify(payload),
-      keepalive: true
-    });
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_PUBLISHABLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
-    } else {
-      console.log('[Splash link_clicks] inserted', payload);
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        console.error('[Splash link_clicks] insert failed', res.status, txt, payload);
+      } else {
+        console.log('[Splash link_clicks] inserted', payload);
+      }
+
+    } catch (e) {
+      console.error('[Splash link_clicks] exception', e);
     }
-
-  } catch (e) {
-    console.error('[Splash link_clicks] exception', e);
   }
-}
 
   /* =========================
      PARENT ROUTES + LABELS
@@ -704,201 +700,9 @@ async function insertLinkClickKeepalive(row){
   })();
 
   /* =========================
-     MUSICBRAINZ PREDICT (Albums only)
+     CLEANUP: remove any old MusicBrainz suggest boxes if present (from older builds)
   ========================== */
-  function debounce(fn, wait) {
-    let t = null;
-    return function(...args) {
-      clearTimeout(t);
-      t = setTimeout(() => fn.apply(this, args), wait);
-    };
-  }
-
-  function ensureSuggestBox(inputEl) {
-    if (!inputEl || inputEl.__SPLASH_SUGGEST_BOX__) return inputEl.__SPLASH_SUGGEST_BOX__;
-
-    const box = document.createElement('div');
-    box.className = 'splash-suggest';
-    box.setAttribute('role', 'listbox');
-    box.dataset.open = '0';
-    box.__activeIndex = -1;
-    box.__items = [];
-
-    const parent = inputEl.parentElement;
-    if (parent) {
-      const cs = window.getComputedStyle(parent);
-      if (cs.position === 'static') parent.style.position = 'relative';
-      parent.appendChild(box);
-    } else {
-      document.body.appendChild(box);
-    }
-
-    inputEl.__SPLASH_SUGGEST_BOX__ = box;
-    return box;
-  }
-
-  function closeSuggest(inputEl) {
-    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
-    if (!box) return;
-    box.dataset.open = '0';
-    box.innerHTML = '';
-    box.__items = [];
-    box.__activeIndex = -1;
-  }
-
-  function setActiveRow(inputEl, index) {
-    const box = inputEl && inputEl.__SPLASH_SUGGEST_BOX__;
-    if (!box || !box.__items.length) return;
-
-    const rows = Array.from(box.querySelectorAll('.row'));
-    rows.forEach(r => r.dataset.active = '0');
-
-    const bounded = Math.max(0, Math.min(index, rows.length - 1));
-    box.__activeIndex = bounded;
-    if (rows[bounded]) rows[bounded].dataset.active = '1';
-  }
-
-  function acceptSuggestion(inputEl, item) {
-    if (!inputEl || !item) return;
-    inputEl.value = item.display || item.label || '';
-    inputEl.dataset.canonicalId = item.id || '';
-    inputEl.dataset.canonicalSource = item.source || '';
-  }
-
-  function renderSuggest(inputEl, items) {
-    const box = ensureSuggestBox(inputEl);
-    box.innerHTML = '';
-    box.__items = items || [];
-    box.__activeIndex = -1;
-
-    if (!items || !items.length) {
-      box.dataset.open = '0';
-      return;
-    }
-
-    items.slice(0, 6).forEach((it, idx) => {
-      const row = document.createElement('div');
-      row.className = 'row';
-      row.dataset.index = String(idx);
-
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = it.label || '';
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = it.meta || '';
-
-      row.appendChild(title);
-      row.appendChild(meta);
-
-      row.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        acceptSuggestion(inputEl, it);
-        closeSuggest(inputEl);
-      });
-
-      box.appendChild(row);
-    });
-
-    box.dataset.open = '1';
-  }
-
-  async function musicBrainzAlbumSearch(query) {
-    const q = String(query || '').trim();
-    if (q.length < 2) return [];
-
-    const dashParts = q.split(/\s[-–—]\s/);
-    let title = (dashParts[0] || '').trim();
-    let artist = (dashParts.slice(1).join(' - ') || '').trim();
-
-    const strict = artist
-      ? `releasegroup:"${title}" AND artist:"${artist}"`
-      : `releasegroup:"${title}"`;
-
-    const loose = artist
-      ? `releasegroup:${title} AND artist:${artist}`
-      : `releasegroup:${title}`;
-
-    const fetchRG = async (mbq) => {
-      const url = `https://musicbrainz.org/ws/2/release-group/?query=${encodeURIComponent(mbq)}&fmt=json&limit=12`;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4500);
-
-      try {
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
-        if (!res.ok) return [];
-        const json = await res.json();
-        const rgs = (json && json['release-groups']) ? json['release-groups'] : [];
-        return Array.isArray(rgs) ? rgs : [];
-      } catch {
-        return [];
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-
-    let rgs = await fetchRG(strict);
-    if (!rgs.length) rgs = await fetchRG(loose);
-
-    const rgArtistName = (rg) => {
-      const ac = rg && rg['artist-credit'];
-      if (!ac || !ac.length) return '';
-      return String(ac[0].name || '');
-    };
-
-    return rgs
-      .filter(rg => rg && rg.id && rg.title)
-      .map(rg => {
-        const primaryArtist = rgArtistName(rg);
-        const year = rg['first-release-date'] ? String(rg['first-release-date']).slice(0,4) : '';
-        const meta = [primaryArtist, year].filter(Boolean).join(' • ');
-        const display = primaryArtist ? `${rg.title} - ${primaryArtist}` : rg.title;
-
-        return { id: rg.id, source: 'musicbrainz', label: rg.title, display, meta };
-      })
-      .slice(0, 6);
-  }
-
-  function bindPredictToInput(inputEl, category) {
-    if (!inputEl || inputEl.__SPLASH_MB_PREDICT__) return;
-    inputEl.__SPLASH_MB_PREDICT__ = true;
-
-    ensureSuggestBox(inputEl);
-
-    const doSearch = debounce(async () => {
-      if (inputEl.dataset.splashPrefilled === '1') return;
-      const v = String(inputEl.value || '').trim();
-      if (v.length < 3) { closeSuggest(inputEl); return; }
-      if (!isAlbumsCategory(category)) return;
-
-      const items = await musicBrainzAlbumSearch(v);
-      renderSuggest(inputEl, items);
-    }, 180);
-
-    inputEl.addEventListener('input', doSearch);
-
-    inputEl.addEventListener('keydown', (e) => {
-      const box = inputEl.__SPLASH_SUGGEST_BOX__;
-      const open = box && box.dataset.open === '1';
-      if (!open) return;
-
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex + 1)); return; }
-      if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveRow(inputEl, (box.__activeIndex < 0 ? 0 : box.__activeIndex - 1)); return; }
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        if (box.__activeIndex >= 0 && box.__items[box.__activeIndex]) {
-          e.preventDefault();
-          acceptSuggestion(inputEl, box.__items[box.__activeIndex]);
-          closeSuggest(inputEl);
-        }
-        return;
-      }
-      if (e.key === 'Escape') { e.preventDefault(); closeSuggest(inputEl); return; }
-    });
-
-    inputEl.addEventListener('blur', () => { setTimeout(() => closeSuggest(inputEl), 120); });
-  }
+  document.querySelectorAll('.splash-suggest').forEach(el => el.remove());
 
   /* =========================
      BACK BUTTONS (SMART ROUTING)
@@ -1816,7 +1620,6 @@ async function insertLinkClickKeepalive(row){
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
-     + Predict bind for Music Albums
      + Canonical-based diff update
      + Global diff baseline from:
         - localStorage snapshot if present
@@ -1829,11 +1632,9 @@ async function insertLinkClickKeepalive(row){
 
     applyLastListToForm(formEl);
 
+    // Albums: keep prefilled behavior only (no MusicBrainz predict)
     if (isAlbumsCategory(category)) {
-      getRankInputs(formEl).forEach(inp => {
-        enablePrefilledBehavior(inp);
-        bindPredictToInput(inp, category);
-      });
+      getRankInputs(formEl).forEach(enablePrefilledBehavior);
     }
 
     formEl.addEventListener('submit', async (event) => {
