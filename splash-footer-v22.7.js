@@ -1,10 +1,11 @@
-// Archived reference snapshot — functional change (analytics 400 hardening)
-// SPLASH FOOTER JS — V24.3.5 (Analytics row-by-row + meta stringify; keeps V24.3.4 offline messaging)
-// BASELINE: V24.3.4
-// Fixes:
-//  - analytics_events insert no longer posts array batches (avoids PostgREST 400 Bad Request edge cases)
-//  - meta is stringified to be compatible with text/jsonb columns safely
-// Keeps everything else unchanged.
+// Archived reference snapshot — functional change (Global List scroll fade hint)
+// SPLASH FOOTER JS — V24.3.6 (Global List fade hint; keeps V24.3.5 analytics hardening + offline messaging)
+// BASELINE: V24.3.5
+// Adds:
+//  - Results page: Global list shows a subtle bottom fade when scrollable
+//  - Fade auto-hides if not scrollable or when near bottom
+// Non-goals:
+//  - No changes to analytics, submissions, link clicks, routing, or global logic
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -372,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ========================== */
   const LIST_ID_KEY = 'splash_list_id';
 
-  // ✅ Note: V24.3.5 keeps your existing behavior. If you want true UUID-only here later, we can tighten it.
+  // ✅ Note: V24.3.6 keeps your existing behavior. If you want true UUID-only here later, we can tighten it.
   function getOrCreateListId() {
     let id = localStorage.getItem(LIST_ID_KEY);
     if (!id) {
@@ -1162,6 +1163,100 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* =========================
+     GLOBAL LIST SCROLL FADE (RESULTS) — V24.3.6 (ADD-ONLY)
+     Purpose: visual hint that #globalList is scrollable (fade-out at bottom).
+     - Creates an overlay inside #globalList without intercepting clicks.
+     - Auto-hides if not scrollable or when scrolled near bottom.
+  ========================== */
+  function ensureGlobalFadeStyles(){
+    if (document.getElementById('splash-global-fade-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'splash-global-fade-styles';
+    style.textContent = `
+      #globalList.splash-fade-host { position: relative; }
+      #globalList .splash-scroll-fade-bottom {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 44px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 180ms ease;
+      }
+      #globalList .splash-scroll-fade-bottom.is-visible { opacity: 1; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function isTransparentBg(bg){
+    const s = String(bg || '').trim().toLowerCase();
+    return !s || s === 'transparent' || s === 'rgba(0, 0, 0, 0)';
+  }
+
+  function findOpaqueBackgroundColor(startEl){
+    let el = startEl;
+    let hops = 0;
+    while (el && hops < 12) {
+      const bg = window.getComputedStyle(el).backgroundColor;
+      if (!isTransparentBg(bg)) return bg;
+      el = el.parentElement;
+      hops++;
+    }
+    return 'rgb(255, 255, 255)';
+  }
+
+  function setupGlobalListFade(globalMount){
+    try {
+      if (!globalMount) return;
+
+      ensureGlobalFadeStyles();
+      globalMount.classList.add('splash-fade-host');
+
+      let fade = globalMount.querySelector('.splash-scroll-fade-bottom');
+      if (!fade) {
+        fade = document.createElement('div');
+        fade.className = 'splash-scroll-fade-bottom';
+        globalMount.appendChild(fade);
+      }
+
+      const bg = findOpaqueBackgroundColor(globalMount);
+      fade.style.background = `linear-gradient(to bottom, rgba(255,255,255,0), ${bg})`;
+
+      const update = () => {
+        const scrollable = globalMount.scrollHeight > (globalMount.clientHeight + 2);
+        if (!scrollable) {
+          fade.classList.remove('is-visible');
+          return;
+        }
+
+        const remaining = globalMount.scrollHeight - globalMount.clientHeight - globalMount.scrollTop;
+        const nearBottom = remaining <= 6;
+
+        if (nearBottom) fade.classList.remove('is-visible');
+        else fade.classList.add('is-visible');
+      };
+
+      if (!globalMount.__SPLASH_FADE_BOUND__) {
+        globalMount.__SPLASH_FADE_BOUND__ = true;
+
+        globalMount.addEventListener('scroll', update, { passive: true });
+
+        let t = null;
+        window.addEventListener('resize', () => {
+          clearTimeout(t);
+          t = setTimeout(update, 120);
+        }, { passive: true });
+
+        requestAnimationFrame(() => requestAnimationFrame(update));
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(update));
+      }
+    } catch {}
+  }
+
+  /* =========================
      RESULTS PAGE (render lists)
   ========================== */
   if (isResultsPage()) {
@@ -1364,6 +1459,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         globalMount.textContent = '';
         globalMount.appendChild(ul);
+
+        // ✅ V24.3.6 add-only: visual scroll hint (fade-out at bottom)
+        setupGlobalListFade(globalMount);
+
       } catch (err) {
         globalMount.innerHTML = 'Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button>';
         toast('Could not load Global Splash (Top 100).', 'error');
