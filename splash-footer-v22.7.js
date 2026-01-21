@@ -649,34 +649,59 @@ if (isHomePage()) {
   document.querySelectorAll('.splash-suggest').forEach(el => el.remove());
 
   /* =========================
-     BACK BUTTONS (SMART ROUTING)
-  ========================== */
-  document.querySelectorAll('.back-button').forEach((btn) => {
-    const currentPath = pathNow();
-    const isParentPage = Object.values(PARENT_ROUTES).some(route => stripTrailingSlash(route) === currentPath);
+   BACK BUTTONS (SMART ROUTING) — ISLAND → HOME OVERRIDE
+   Change:
+   - Results: unchanged (Back to choices → parent category route)
+   - Island: Back goes to Home (/)
+========================= */
+document.querySelectorAll('.back-button').forEach((btn) => {
+  const currentPath = pathNow();
+  const isParentPage = Object.values(PARENT_ROUTES).some(route => stripTrailingSlash(route) === currentPath);
 
-    let parent = '';
-    if (isResultsPage() || isIslandPage()) {
-      parent = getParentFromCategory(categoryFromQuery) || getLastParent();
-    } else {
-      parent = getParentFromPath() || getLastParent();
-    }
+  let parent = '';
+  if (isResultsPage() || isIslandPage()) {
+    parent = getParentFromCategory(categoryFromQuery) || getLastParent();
+  } else {
+    parent = getParentFromPath() || getLastParent();
+  }
 
-    if ((isResultsPage() || isIslandPage()) && parent && PARENT_ROUTES[parent]) {
-      btn.textContent = '← Back to choices';
-    } else if (!isParentPage && parent && PARENT_ROUTES[parent]) {
-      btn.textContent = `← Back to ${PARENT_DISPLAY[parent] || parent}`;
-    } else {
-      btn.textContent = '← Back to Home';
-    }
+  // ✅ LABELS
+  if (isIslandPage()) {
+    btn.textContent = '← Back to Home';
+  } else if (isResultsPage() && parent && PARENT_ROUTES[parent]) {
+    btn.textContent = '← Back to choices';
+  } else if (!isParentPage && parent && PARENT_ROUTES[parent]) {
+    btn.textContent = `← Back to ${PARENT_DISPLAY[parent] || parent}`;
+  } else {
+    btn.textContent = '← Back to Home';
+  }
 
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      if ((isResultsPage() || isIslandPage()) && parent && PARENT_ROUTES[parent]) { window.location.href = window.location.origin + PARENT_ROUTES[parent]; return; }
-      if (!isParentPage && parent && PARENT_ROUTES[parent]) { window.location.href = window.location.origin + PARENT_ROUTES[parent]; return; }
+  // ✅ ROUTES
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+
+    // Island always returns Home
+    if (isIslandPage()) {
       window.location.href = window.location.origin + '/';
-    });
+      return;
+    }
+
+    // Results → back to category choices
+    if (isResultsPage() && parent && PARENT_ROUTES[parent]) {
+      window.location.href = window.location.origin + PARENT_ROUTES[parent];
+      return;
+    }
+
+    // Other pages: back to inferred parent
+    if (!isParentPage && parent && PARENT_ROUTES[parent]) {
+      window.location.href = window.location.origin + PARENT_ROUTES[parent];
+      return;
+    }
+
+    // Fallback
+    window.location.href = window.location.origin + '/';
   });
+});
 
   /* =========================
      RESULTS → ISLAND BUTTON
