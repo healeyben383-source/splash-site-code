@@ -622,14 +622,25 @@ applyHomeIslandGate();
   ========================== */
   document.querySelectorAll('.share-button').forEach((btn) => {
 
-    if (isIslandPage() && !isIslandOwner) {
-      btn.textContent = 'Make your own Splash';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        window.location.href = window.location.origin + '/';
-      });
-      return;
+   if (isIslandPage() && !isIslandOwner) {
+  btn.textContent = 'Make your own Splash';
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+
+    // If they've already successfully submitted at least once on THIS browser,
+    // route them straight to THEIR island identity. Otherwise send them Home.
+    let allowed = false;
+    try { allowed = localStorage.getItem('splash_has_submitted_top5') === '1'; } catch (err) {}
+
+    if (allowed) {
+      window.location.href =
+        window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
+    } else {
+      window.location.href = window.location.origin + '/';
     }
+  });
+  return;
+}
 
     btn.textContent = 'Share my island';
 
