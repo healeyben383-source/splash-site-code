@@ -411,6 +411,57 @@ function applyHomeIslandGate(){
     });
   } catch(e) {}
 }
+/* =========================
+   HOME "YOUR ISLAND" GATE — HYBRID RESOLVER (V24.3.9 ADD-ONLY)
+   Behavior:
+   - Home-only
+   - If local flag missing, do a one-time Supabase check:
+     does viewerListId have at least 1 row in lists?
+   - If yes, set local flag and re-apply gate (button appears)
+   - Fail-soft: any error leaves button hidden (no breakage)
+========================= */
+function initHomeIslandGateHybrid(viewerListId){
+  try {
+    if (!isHomePage()) return;
+    if (!viewerListId) return;
+
+    // Always apply local gate immediately
+    applyHomeIslandGate();
+
+    // Already eligible → no Supabase call
+    if (hasSubmittedOnce()) return;
+
+    // One-shot guard
+    if (window.__SPLASH_HOME_GATE_CHECKED__) return;
+    window.__SPLASH_HOME_GATE_CHECKED__ = true;
+
+    // Defer slightly to avoid Webflow timing issues
+    setTimeout(async () => {
+      try {
+        if (!isHomePage()) return;
+        if (hasSubmittedOnce()) { applyHomeIslandGate(); return; }
+
+        const { data, error } = await supabase
+          .from('lists')
+          .select('id')
+          .eq('user_id', viewerListId)
+          .limit(1);
+
+        if (error) return;
+
+        if (Array.isArray(data) && data.length > 0) {
+          setHasSubmittedOnce();
+          applyHomeIslandGate();
+        }
+      } catch(e) {
+        // fail-soft
+      }
+    }, 250);
+
+  } catch(e) {
+    // fail-soft
+  }
+}
 
   const normalizeParentKey = (k) => PARENT_ALIASES[(k||'').toLowerCase()] || (k||'').toLowerCase();
   const getParentFromCategory = (c) => normalizeParentKey((c||'').split('-')[0]);
@@ -442,6 +493,10 @@ function applyHomeIslandGate(){
   }
 
   const viewerListId = getOrCreateListId();
+  
+  // ✅ Home Island Gate (Hybrid): resolve visibility after viewerListId exists
+initHomeIslandGateHybrid(viewerListId);
+
   const urlParams = new URLSearchParams(window.location.search);
   const categoryFromQuery = urlParams.get('category') || '';
 
