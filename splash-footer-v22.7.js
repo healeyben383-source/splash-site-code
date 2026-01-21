@@ -496,6 +496,24 @@ function initHomeIslandGateHybrid(viewerListId){
   
   // ✅ Home Island Gate (Hybrid): resolve visibility after viewerListId exists
 initHomeIslandGateHybrid(viewerListId);
+/* =========================
+   HOME → ISLAND BUTTON ROUTE (ADD-ONLY)
+========================= */
+if (isHomePage()) {
+  document
+    .querySelectorAll('.nav-island-button')
+    .forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+
+        // Safety: require a list id
+        if (!viewerListId) return;
+
+        window.location.href =
+          `${window.location.origin}${ISLAND_PATH}?listId=${encodeURIComponent(viewerListId)}`;
+      });
+    });
+}
 
   const urlParams = new URLSearchParams(window.location.search);
   const categoryFromQuery = urlParams.get('category') || '';
