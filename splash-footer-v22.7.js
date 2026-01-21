@@ -361,7 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
    - On Home (/), hide Island button until at least one successful submit
    - Does NOT affect Results or Island pages
 ========================= */
-const HAS_SUBMITTED_ONCE_KEY = 'splash_has_submitted_once';
+const HAS_SUBMITTED_ONCE_KEY = 'splash_has_submitted_top5';
 
 const isHomePage = () => {
   const p = pathNow();
