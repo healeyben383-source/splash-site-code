@@ -355,6 +355,62 @@ document.addEventListener('DOMContentLoaded', () => {
   const pathNow = () => stripTrailingSlash(window.location.pathname);
   const isResultsPage = () => pathNow() === RESULTS_PATH;
   const isIslandPage  = () => pathNow() === ISLAND_PATH;
+/* =========================
+   HOME "YOUR ISLAND" VISIBILITY GATE — V24.3.7 (ADD-ONLY)
+   Purpose:
+   - On Home (/), hide Island button until at least one successful submit
+   - Does NOT affect Results or Island pages
+========================= */
+const HAS_SUBMITTED_ONCE_KEY = 'splash_has_submitted_once';
+
+const isHomePage = () => {
+  const p = pathNow();
+  return p === '' || p === '/';
+};
+
+function setHasSubmittedOnce(){
+  try { localStorage.setItem(HAS_SUBMITTED_ONCE_KEY, '1'); } catch(e) {}
+}
+
+function hasSubmittedOnce(){
+  try { return localStorage.getItem(HAS_SUBMITTED_ONCE_KEY) === '1'; } catch(e) { return false; }
+}
+
+// Home-only targeting; safe even if .island-button is reused elsewhere
+function getHomeIslandButtons(){
+  return Array.from(document.querySelectorAll(
+    [
+      '.home-island-button',
+      '.your-island-button',
+      '.island-home-button',
+      '.nav-island-button',
+      '.island-button'
+    ].join(',')
+  ));
+}
+
+function applyHomeIslandGate(){
+  try {
+    if (!isHomePage()) return;
+
+    const btns = getHomeIslandButtons();
+    if (!btns.length) return;
+
+    const allowed = hasSubmittedOnce();
+
+    btns.forEach((btn) => {
+      if (!allowed) {
+        btn.style.display = 'none';
+        btn.setAttribute('aria-hidden', 'true');
+        btn.setAttribute('tabindex', '-1');
+      } else {
+        btn.style.display = '';
+        btn.removeAttribute('aria-hidden');
+        btn.removeAttribute('tabindex');
+      }
+    });
+  } catch(e) {}
+}
 
   const normalizeParentKey = (k) => PARENT_ALIASES[(k||'').toLowerCase()] || (k||'').toLowerCase();
   const getParentFromCategory = (c) => normalizeParentKey((c||'').split('-')[0]);
@@ -559,6 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
     });
   });
+applyHomeIslandGate();
 
   /* =========================
      SHARE BUTTON (ISLAND) — OWNERSHIP LOCK
@@ -1565,6 +1622,8 @@ document.addEventListener('DOMContentLoaded', () => {
             list_id: viewerListId,
             changed: false
           });
+// ✅ Home Island Gate: mark eligible after first successful submit
+try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 
           window.location.href =
             window.location.origin +
@@ -1636,6 +1695,8 @@ document.addEventListener('DOMContentLoaded', () => {
           removed: Array.isArray(removed) ? removed.length : 0,
           global_ok: globalOk
         });
+// ✅ Home Island Gate: reaffirm eligibility after successful edit submit
+try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 
         window.location.href =
           window.location.origin +
