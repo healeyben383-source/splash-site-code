@@ -1141,11 +1141,56 @@ applyHomeIslandGate();
 
     return { added, removed };
   }
+/* =========================
+   GLOBAL ITEMS ALIASING (BETA CLEANUP) — V24.3.7 (ADD-ONLY)
+   Purpose:
+   - Map common variants/typos to one canonical display string
+   - Prevent global_items splitting (e.g., Prog Rock / Progressive Rock)
+   Notes:
+   - Increment path: uses display → aliases → canonical override
+   - Decrement path: aliases canonical variants to the unified canonical
+========================== */
+function applyGlobalAliases(category, display) {
+  const cat = String(category || '').trim().toLowerCase();
+  const key = String(display || '').trim().toLowerCase();
+
+  const ALIASES = {
+    'music-genres': {
+      'prog rock': 'Progressive Rock',
+      'prog roock': 'Progressive Rock',
+      'progressive rock': 'Progressive Rock'
+    }
+  };
+
+  return (ALIASES[cat] && ALIASES[cat][key]) ? ALIASES[cat][key] : display;
+}
+
+function applyGlobalCanonicalAliases(category, canonical) {
+  const cat = String(category || '').trim().toLowerCase();
+  const canon = String(canonical || '').trim().toLowerCase();
+
+  const CANON_ALIASES = {
+    'music-genres': {
+      // Any previously-created canonical variants that must converge
+      'prog-rock': 'progressive-rock',
+      'prog-roock': 'progressive-rock',
+      'progressive-rock': 'progressive-rock'
+    }
+  };
+
+  return (CANON_ALIASES[cat] && CANON_ALIASES[cat][canon]) ? CANON_ALIASES[cat][canon] : canonical;
+}
 
   async function incrementGlobalItemByCanonical(category, canonical, display){
-    const canon = String(canonical || '').trim();
-    const disp  = normText(display);
-    if (!canon) return;
+   let disp = normText(display);
+disp = applyGlobalAliases(category, disp);
+
+// Force canonical to match aliased display (prevents fragmentation)
+let canon = String(canonical || '').trim();
+const aliasCanon = canonicalFromDisplay(disp);
+if (aliasCanon) canon = aliasCanon;
+
+if (!canon) return;
 
     const { data: existing, error: selErr } = await supabase
       .from('global_items')
@@ -1183,8 +1228,11 @@ applyHomeIslandGate();
   }
 
   async function decrementGlobalItemByCanonical(category, canonical){
-    const canon = String(canonical || '').trim();
+    let canon = String(canonical || '').trim();
     if (!canon) return;
+
+    // Keep decrement aligned with increment aliasing (prevents count drift)
+    canon = applyGlobalCanonicalAliases(category, canon);
 
     const { data: existing, error: selErr } = await supabase
       .from('global_items')
