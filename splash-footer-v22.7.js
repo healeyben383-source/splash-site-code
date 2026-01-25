@@ -535,6 +535,63 @@ if (isHomePage()) {
     is_island: isIslandPage(),
     is_owner: isIslandOwner
   });
+/* =========================
+   ISLAND RETURN SIGNAL + ANALYTICS — V24.3.10 (ADD-ONLY)
+   Purpose:
+   - Instrument Island as a destination (view + return)
+   - Show ONE quiet signal if Island was updated since last Island visit
+   Non-goals:
+   - No gating changes
+   - No UI refactors; uses existing toast()
+========================= */
+
+const LAST_ISLAND_VIEW_AT_KEY     = 'splash_last_island_view_at';
+const LAST_SUBMIT_SUCCESS_AT_KEY  = 'splash_last_submit_success_at';
+
+function readIsoTime(key){
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : null;
+  } catch (e) { return null; }
+}
+
+function writeIsoNow(key){
+  try { localStorage.setItem(key, new Date().toISOString()); } catch (e) {}
+}
+
+if (isIslandPage()) {
+  const prevIslandViewAt = readIsoTime(LAST_ISLAND_VIEW_AT_KEY);
+
+  // Always log island_view
+  logEvent('island_view', {
+    list_id: listId,
+    is_owner: isIslandOwner
+  });
+
+  // If we have any prior island view timestamp, this is a return visit
+  if (prevIslandViewAt) {
+    logEvent('island_return', {
+      list_id: listId,
+      is_owner: isIslandOwner
+    });
+  }
+
+  // Quiet update signal for OWNER only (avoid confusing viewers)
+  const lastSubmitAt = readIsoTime(LAST_SUBMIT_SUCCESS_AT_KEY);
+
+  if (isIslandOwner && lastSubmitAt && (!prevIslandViewAt || lastSubmitAt > prevIslandViewAt)) {
+    toast('Your Island has been updated since your last visit.', 'info', 4200);
+
+    logEvent('island_update_signal_shown', {
+      list_id: listId
+    });
+  }
+
+  // Update last island view timestamp at end
+  writeIsoNow(LAST_ISLAND_VIEW_AT_KEY);
+}
 
   /* =========================
      LAST PARENT MEMORY
@@ -1733,6 +1790,7 @@ applyHomeIslandGate();
           });
 // ✅ Home Island Gate: mark eligible after first successful submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
+try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
 
           window.location.href =
             window.location.origin +
@@ -1806,6 +1864,7 @@ try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
         });
 // ✅ Home Island Gate: reaffirm eligibility after successful edit submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
+try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
 
         window.location.href =
           window.location.origin +
