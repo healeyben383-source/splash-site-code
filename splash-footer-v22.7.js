@@ -1150,13 +1150,21 @@ applyHomeIslandGate();
    - Increment path: uses display → aliases → canonical override
    - Decrement path: aliases canonical variants to the unified canonical
 ========================== */
+function normalizeAliasCategory(category){
+  const c = String(category || '').trim().toLowerCase();
+  // Apply aliasing to music-genres and any subcategory variations
+  if (c === 'music-genres' || c.startsWith('music-genres-')) return 'music-genres';
+  return c;
+}
+
 function applyGlobalAliases(category, display) {
-  const cat = String(category || '').trim().toLowerCase();
+  const cat = normalizeAliasCategory(category);
   const key = String(display || '').trim().toLowerCase();
 
   const ALIASES = {
     'music-genres': {
       'prog rock': 'Progressive Rock',
+      'prog-rock': 'Progressive Rock', // ✅ add hyphen form too
       'prog roock': 'Progressive Rock',
       'progressive rock': 'Progressive Rock'
     }
@@ -1166,12 +1174,11 @@ function applyGlobalAliases(category, display) {
 }
 
 function applyGlobalCanonicalAliases(category, canonical) {
-  const cat = String(category || '').trim().toLowerCase();
+  const cat = normalizeAliasCategory(category);
   const canon = String(canonical || '').trim().toLowerCase();
 
   const CANON_ALIASES = {
     'music-genres': {
-      // Any previously-created canonical variants that must converge
       'prog-rock': 'progressive-rock',
       'prog-roock': 'progressive-rock',
       'progressive-rock': 'progressive-rock'
@@ -1180,6 +1187,7 @@ function applyGlobalCanonicalAliases(category, canonical) {
 
   return (CANON_ALIASES[cat] && CANON_ALIASES[cat][canon]) ? CANON_ALIASES[cat][canon] : canonical;
 }
+
 
   async function incrementGlobalItemByCanonical(category, canonical, display){
    let disp = normText(display);
