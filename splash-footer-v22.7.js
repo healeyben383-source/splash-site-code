@@ -1447,6 +1447,39 @@ if (!canon) return;
     });
     return out;
   }
+  /* =========================
+   GLOBAL VOTE DEDUPE (PER LIST) — V24.3.11 (ADD-ONLY)
+   Purpose:
+   - Prevent multiple votes for the same canonical item within ONE Top 5 submission
+   - Does NOT change what the user typed/saved in lists table
+   - Only affects global_items increment/decrement diff set
+========================= */
+function dedupeValuesForGlobalByCanonical(category, values){
+  const seen = new Set();
+  const out = [];
+
+  (values || []).forEach((raw) => {
+    const v = String(raw || '').trim();
+    if (!v) return;
+
+    // Apply display aliasing first
+    const disp = applyGlobalAliases(category, v);
+
+    // Canonical from aliased display
+    let canon = canonicalFromDisplay(disp);
+    if (!canon) return;
+
+    // Canonical alias convergence
+    canon = applyGlobalCanonicalAliases(category, canon);
+
+    if (seen.has(canon)) return;
+    seen.add(canon);
+
+    out.push(disp);
+  });
+
+  return out;
+}
 
   /* =========================
      NO-CHANGE GUARD HELPERS
@@ -1859,7 +1892,9 @@ if (!canon) return;
         const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
 
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
-          const eligibleNew = eligibleValuesForGlobal(category, newValues);
+          const eligibleNewRaw = eligibleValuesForGlobal(category, newValues);
+          const eligibleNew = dedupeValuesForGlobalByCanonical(category, eligibleNewRaw);
+
           saveGlobalApplied(category, eligibleNew);
 
           logEvent('submit_success', {
@@ -1902,9 +1937,11 @@ try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOStri
             ? appliedOld
             : eligibleFromRow(category, existingRow);
 
-          const eligibleNew = eligibleValuesForGlobal(category, newValues);
+          const eligibleNewRaw = eligibleValuesForGlobal(category, newValues);
+          const eligibleNew = dedupeValuesForGlobalByCanonical(category, eligibleNewRaw);
+          const oldValuesDeduped = dedupeValuesForGlobalByCanonical(category, oldValuesForGlobal);
 
-          ({ added, removed } = diffCanonicalMultiset(oldValuesForGlobal, eligibleNew));
+          ({ added, removed } = diffCanonicalMultiset(oldValuesDeduped, eligibleNew));
 
           if (changed) {
             logEvent('item_changed', {
