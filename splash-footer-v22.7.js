@@ -1220,19 +1220,42 @@ if (!canon) return;
         .eq('id', existing.id);
 
       if (upErr) throw upErr;
-    } else {
-      const { error: insErr } = await supabase
-        .from('global_items')
-        .insert({
-          category: category,
-          source: 'user_input',
-          canonical_id: canon,
-          display_name: disp || canon,
-          count: 1
-        });
+  } else {
+  const { error: insErr } = await supabase
+    .from('global_items')
+    .insert({
+      category: category,
+      source: 'user_input',
+      canonical_id: canon,
+      display_name: disp || canon,
+      count: 1
+    });
 
-      if (insErr) throw insErr;
+  if (insErr) {
+    // 23505 = unique_violation (Postgres)
+    if (insErr.code === '23505') {
+      // Row already exists due to race or alias convergence — increment instead
+      const { data: existing2, error: selErr2 } = await supabase
+        .from('global_items')
+        .select('id, count')
+        .eq('category', category)
+        .eq('canonical_id', canon)
+        .maybeSingle();
+
+      if (selErr2 || !existing2) throw selErr2;
+
+      const { error: upErr2 } = await supabase
+        .from('global_items')
+        .update({ count: Number(existing2.count || 0) + 1 })
+        .eq('id', existing2.id);
+
+      if (upErr2) throw upErr2;
+    } else {
+      throw insErr;
     }
+  }
+}
+
   }
 
   async function decrementGlobalItemByCanonical(category, canonical){
