@@ -861,7 +861,7 @@ applyHomeIslandGate();
       return { aLabel:'Spotify', aUrl:`https://open.spotify.com/search/${enc(plain)}`, bLabel:'Apple Music', bUrl:`https://music.apple.com/search?term=${enc(plain)}` };
     }
 
-    if (parent === 'movies') return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'TMDB', bUrl:`https://www.themoviedb.org/search?query=${enc(title)}` };
+    if (parent === 'movies') return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Amazon', bUrl:`https://www.amazon.com/s?k=${enc(title)}+movie` };
     if (parent === 'tv')     return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
     if (parent === 'books')  return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Amazon', bUrl:`https://www.amazon.com/s?k=${enc(title)}` };
     if (parent === 'games')  return { aLabel:'Metacritic', aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`, bLabel:'Wikipedia', bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}` };
