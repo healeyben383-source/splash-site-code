@@ -850,6 +850,8 @@ applyHomeIslandGate();
     const google = (q) => `https://www.google.com/search?q=${enc(q)}`;
     const maps   = (q) => `https://www.google.com/maps/search/?api=1&query=${enc(q)}`;
     const youtube= (q) => `https://www.youtube.com/results?search_query=${enc(q)}`;
+    const amazon = (q) => `https://www.amazon.com/s?k=${enc(q)}`;
+
 
     if (parent === 'music') {
       const plain = (artist ? `${title} ${artist}` : title).trim();
@@ -861,7 +863,7 @@ applyHomeIslandGate();
 
     if (parent === 'movies') return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'TMDB', bUrl:`https://www.themoviedb.org/search?query=${enc(title)}` };
     if (parent === 'tv')     return { aLabel:'IMDb', aUrl:`https://www.imdb.com/find/?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} tv series`) };
-    if (parent === 'books')  return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Google Books', bUrl:`https://www.google.com/search?tbm=bks&q=${enc(title)}` };
+    if (parent === 'books')  return { aLabel:'Goodreads', aUrl:`https://www.goodreads.com/search?q=${enc(title)}`, bLabel:'Amazon', bUrl:`https://www.amazon.com/s?k=${enc(title)}` };
     if (parent === 'games')  return { aLabel:'Metacritic', aUrl:`https://www.metacritic.com/search/all/${enc(title)}/results`, bLabel:'Wikipedia', bUrl:`https://en.wikipedia.org/wiki/Special:Search?search=${enc(title)}` };
     if (parent === 'travel') return { aLabel:'Tripadvisor', aUrl:`https://www.tripadvisor.com/Search?q=${enc(title)}`, bLabel:'Maps', bUrl: maps(title) };
     if (parent === 'food')   return { aLabel:'Allrecipes', aUrl:`https://www.allrecipes.com/search?q=${enc(title)}`, bLabel:'Google', bUrl: google(`${title} recipe`) };
