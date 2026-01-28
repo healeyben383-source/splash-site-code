@@ -1217,6 +1217,11 @@ function applyGlobalCanonicalAliases(category, canonical) {
       'pinkfloyd': 'pink-floyd',
       'pink-floyd': 'pink-floyd',
 
+      // Led Zeppelin
+      'led-zep': 'led-zeppelin',
+      'led-zeppelin': 'led-zeppelin',
+      'led-zepplin': 'led-zeppelin',
+
       // Smashing Pumpkins
       'smashing-punkins': 'the-smashing-pumpkins',
       'smashing-pumpkins': 'the-smashing-pumpkins',
