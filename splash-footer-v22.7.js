@@ -1174,6 +1174,11 @@ function applyGlobalAliases(category, display) {
       'progressive rock': 'Progressive Rock'
     },
 
+    // NOTE:
+    // This block is intentionally small and manual.
+    // Only add high-frequency, human-confirmed variants.
+    // Do NOT add fuzzy or broad rules here.
+    
     // ✅ NEW: music artists cleanup (add-only, explicit mappings only)
     'music-artists': {
       // Rolling Stones variants
