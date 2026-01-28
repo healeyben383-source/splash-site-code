@@ -1154,21 +1154,41 @@ applyHomeIslandGate();
 ========================== */
 function normalizeAliasCategory(category){
   const c = String(category || '').trim().toLowerCase();
-  // Apply aliasing to music-genres and any subcategory variations
-  if (c === 'music-genres' || c.startsWith('music-genres-')) return 'music-genres';
+
+  // normalize "family" categories (future-proof)
+  if (c === 'music-genres'  || c.startsWith('music-genres-'))  return 'music-genres';
+  if (c === 'music-artists' || c.startsWith('music-artists-')) return 'music-artists';
+
   return c;
 }
 
 function applyGlobalAliases(category, display) {
   const cat = normalizeAliasCategory(category);
-  const key = String(display || '').trim().toLowerCase();
+  const key = String(display || '').trim().toLowerCase().replace(/\s+/g,' ');
 
   const ALIASES = {
     'music-genres': {
       'prog rock': 'Progressive Rock',
-      'prog-rock': 'Progressive Rock', // ✅ add hyphen form too
+      'prog-rock': 'Progressive Rock',
       'prog roock': 'Progressive Rock',
       'progressive rock': 'Progressive Rock'
+    },
+
+    // ✅ NEW: music artists cleanup (add-only, explicit mappings only)
+    'music-artists': {
+      // Rolling Stones variants
+      'rolling stone': 'The Rolling Stones',
+      'rolling stones': 'The Rolling Stones',
+      'the rolling stones': 'The Rolling Stones',
+
+      // Pink Floyd variants
+      'pinkfloyd': 'Pink Floyd',
+      'pink floyd': 'Pink Floyd',
+
+      // Smashing Pumpkins variants / typo
+      'smashing punkins': 'The Smashing Pumpkins',
+      'smashing pumpkins': 'The Smashing Pumpkins',
+      'the smashing pumpkins': 'The Smashing Pumpkins'
     }
   };
 
@@ -1179,17 +1199,33 @@ function applyGlobalCanonicalAliases(category, canonical) {
   const cat = normalizeAliasCategory(category);
   const canon = String(canonical || '').trim().toLowerCase();
 
+  // Canonical targets (must match what increment will produce)
   const CANON_ALIASES = {
     'music-genres': {
       'prog-rock': 'progressive-rock',
       'prog-roock': 'progressive-rock',
       'progressive-rock': 'progressive-rock'
+    },
+
+    'music-artists': {
+      // Rolling Stones
+      'rolling-stone': 'the-rolling-stones',
+      'rolling-stones': 'the-rolling-stones',
+      'the-rolling-stones': 'the-rolling-stones',
+
+      // Pink Floyd
+      'pinkfloyd': 'pink-floyd',
+      'pink-floyd': 'pink-floyd',
+
+      // Smashing Pumpkins
+      'smashing-punkins': 'the-smashing-pumpkins',
+      'smashing-pumpkins': 'the-smashing-pumpkins',
+      'the-smashing-pumpkins': 'the-smashing-pumpkins'
     }
   };
 
   return (CANON_ALIASES[cat] && CANON_ALIASES[cat][canon]) ? CANON_ALIASES[cat][canon] : canonical;
 }
-
 
   async function incrementGlobalItemByCanonical(category, canonical, display){
    let disp = normText(display);
@@ -1674,14 +1710,19 @@ function dedupeValuesForGlobalByCanonical(category, values){
             const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
             openBtn.setAttribute('data-di-links', payload);
 
-            const meta = {
-              category: category,
-              canonical_id: canonicalFromDisplay(v),
-              display_name: v,
-              source: 'user_top5',
-              page: '/results',
-              list_id: viewerListId
-            };
+           const dispMeta = applyGlobalAliases(category, v);
+let canonMeta = canonicalFromDisplay(dispMeta);
+canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
+
+const meta = {
+  category: category,
+  canonical_id: canonMeta,
+  display_name: dispMeta,
+  source: 'user_top5',
+  page: '/results',
+  list_id: viewerListId
+};
+
             openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
             styleOpenButton(openBtn);
