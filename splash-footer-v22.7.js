@@ -93,14 +93,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
 
     // ✅ text-safe meta: stringify to avoid schema mismatch 400s
-    const safeRow = { ...row };
-    try {
-      if (safeRow.meta && typeof safeRow.meta === 'object') {
-        safeRow.meta = JSON.stringify(safeRow.meta);
-      }
-    } catch {
-      safeRow.meta = null;
-    }
+   // meta is jsonb in Supabase — must be a plain object
+safeRow.meta = (safeRow.meta && typeof safeRow.meta === 'object')
+  ? safeRow.meta
+  : null;
+
 
     const res = await fetch(url, {
       method: 'POST',
