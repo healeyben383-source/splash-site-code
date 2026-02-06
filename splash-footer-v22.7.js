@@ -88,34 +88,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let __FLUSHING__ = false;
 
-  // ✅ V24.3.5: post a single row (not an array batch)
-  async function postAnalyticsOneKeepalive(row){
-    const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
+// ✅ V24.3.5: post a single row (not an array batch)
+async function postAnalyticsOneKeepalive(row){
+  const url = `${SUPABASE_URL}/rest/v1/analytics_events`;
 
-    // ✅ text-safe meta: stringify to avoid schema mismatch 400s
-   // meta is jsonb in Supabase — must be a plain object
-safeRow.meta = (safeRow.meta && typeof safeRow.meta === 'object')
-  ? safeRow.meta
-  : null;
+  // IMPORTANT: define safeRow (was missing)
+  const safeRow = { ...row };
 
+  // meta is jsonb in Supabase — must be a plain object (not a string)
+  safeRow.meta = (safeRow.meta && typeof safeRow.meta === 'object')
+    ? safeRow.meta
+    : null;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_PUBLISHABLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify(safeRow),
-      keepalive: true
-    });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_PUBLISHABLE_KEY,
+      'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify(safeRow),
+    keepalive: true
+  });
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
-    }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`analytics insert failed: ${res.status} ${txt || ''}`.trim());
   }
+}
+
 
   async function flushQueue(){
     if (__FLUSHING__) return;
