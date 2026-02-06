@@ -43,20 +43,25 @@ document.addEventListener('DOMContentLoaded', () => {
     return re.test(s) ? s : null;
   }
 
-  function getSessionId(){
-    try {
-      let sid = localStorage.getItem(ANALYTICS_SESSION_KEY);
-      sid = uuidOrNull(sid);
+  function getSessionId() {
+  try {
+    let sid = localStorage.getItem(ANALYTICS_SESSION_KEY);
 
-      if (!sid) {
-        sid = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
-        localStorage.setItem(ANALYTICS_SESSION_KEY, sid);
-      }
-      return sid;
-    } catch {
-      return (crypto.randomUUID && crypto.randomUUID()) || uuidv4Fallback();
+    // Coerce + self-heal: must always be a valid UUID
+    sid = uuidOrNull(sid);
+
+    if (!sid) {
+      sid = (crypto.randomUUID && crypto.randomUUID()) || uuidv4fallback();
+      localStorage.setItem(ANALYTICS_SESSION_KEY, sid);
     }
+
+    return sid;
+  } catch {
+    // Fail-soft: still return a UUID for this pageview
+    return (crypto.randomUUID && crypto.randomUUID()) || uuidv4fallback();
   }
+}
+
 
   function readQueue(){
     try {
