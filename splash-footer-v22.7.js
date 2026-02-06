@@ -150,9 +150,31 @@ document.addEventListener('DOMContentLoaded', () => {
   }, { passive: true });
 
   window.addEventListener('pagehide', () => { flushQueue(); }, { passive: true });
+  // BEGIN V24.3.13 ADD-ONLY — enforce analytics event_name allowlist
+  const ANALYTICS_EVENT_ALLOWLIST = new Set([
+    'visit',
+    'results_view',
+    'submit_click',
+    'submit_error',
+    'submit_success',
+    'item_changed',
+    'global_update_error',
+    'island_view',
+    'island_return',
+    'island_update_signal_shown'
+  ]);
+
+  function coerceAllowedEventName(name){
+    const n = String(name || '').trim();
+    if (!n) return null;
+    return ANALYTICS_EVENT_ALLOWLIST.has(n) ? n : null;
+  }
+  // END V24.3.13 ADD-ONLY
 
   function logEvent(event_name, meta = {}) {
     try {
+      if (!event_name) return;
+      event_name = coerceAllowedEventName(event_name);
       if (!event_name) return;
 
       const payload = {
