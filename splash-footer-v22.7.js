@@ -168,6 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
       flushQueue();
     } catch {}
   }
+// BEGIN V24.3.12 ADD-ONLY — expose safe hooks for Island scripts
+try {
+  // Allow other scripts (Island, prototypes) to log using the same queue/flush pipeline.
+  window.__SPLASH_LOG_EVENT__ = logEvent;
+} catch(e) {}
+// END V24.3.12 ADD-ONLY
 
   /* =========================
      BETA ERROR UI (FAIL-SOFT)
@@ -240,6 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => { try { card.remove(); } catch(e) {} }, ttl);
     } catch {}
   }
+// BEGIN V24.3.12 ADD-ONLY — expose toast for Island scripts
+try {
+  window.__SPLASH_TOAST__ = toast;
+} catch(e) {}
+// END V24.3.12 ADD-ONLY
 
   function setInlineError(formEl, msg){
     try {
