@@ -600,7 +600,7 @@ if (isHomePage()) {
    - No UI refactors; uses existing toast()
 ========================= */
 
-const LAST_ISLAND_VIEW_AT_KEY     = 'splash_last_island_view_at';
+const LAST_ISLAND_VIEW_AT_KEY = `splash_last_island_view_at:${listId}`;
 const LAST_SUBMIT_SUCCESS_AT_KEY  = 'splash_last_submit_success_at';
 
 function readIsoTime(key){
