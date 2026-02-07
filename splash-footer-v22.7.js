@@ -24,6 +24,12 @@ document.addEventListener('DOMContentLoaded', () => {
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
   ========================== */
+
+  // analytics_events invariant:
+// - category is nullable
+// - island_* events intentionally have no category
+// - enforced by DB allowlist + nullable column
+
   const ANALYTICS_SESSION_KEY = 'splash_session_id';
   const ANALYTICS_QUEUE_KEY = 'splash_analytics_queue_v1';
   const ANALYTICS_QUEUE_MAX = 200;
