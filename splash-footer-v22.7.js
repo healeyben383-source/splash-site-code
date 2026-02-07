@@ -120,30 +120,39 @@ async function postAnalyticsOneKeepalive(row){
 
 
   async function flushQueue(){
-    if (__FLUSHING__) return;
-    __FLUSHING__ = true;
+  if (__FLUSHING__) return;
+  __FLUSHING__ = true;
 
-    try {
-      let q = readQueue();
-      if (!q.length) return;
+  try {
+    while (true) {
+      const q = readQueue();
+      if (!q.length) break;
 
-      while (q.length) {
-        const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
+      const batch = q.slice(0, ANALYTICS_FLUSH_CHUNK);
+      const remainder = q.slice(batch.length);
 
-        // ✅ row-by-row to avoid PostgREST bulk edge cases
+      // ✅ IMPORTANT: commit removal first so concurrent enqueues won't be lost
+      writeQueue(remainder);
+
+      try {
         for (const row of batch) {
           await postAnalyticsOneKeepalive(row);
         }
-
-        q = q.slice(batch.length);
-        writeQueue(q);
+      } catch (e) {
+        // ✅ If posting fails, put the batch back at the front (preserve order),
+        // but DON'T overwrite any new events that may have been enqueued meanwhile.
+        const now = readQueue();
+        writeQueue(batch.concat(now));
+        throw e;
       }
-    } catch {
-      // leave queue intact
-    } finally {
-      __FLUSHING__ = false;
     }
+  } catch {
+    // fail-silent
+  } finally {
+    __FLUSHING__ = false;
   }
+}
+
 
   flushQueue();
   setTimeout(flushQueue, 1500);
