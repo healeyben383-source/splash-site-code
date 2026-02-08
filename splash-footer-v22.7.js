@@ -1,11 +1,5 @@
-// Archived reference snapshot — functional change (Global List scroll fade hint)
-// SPLASH FOOTER JS — V24.3.6 (Global List fade hint; keeps V24.3.5 analytics hardening + offline messaging)
-// BASELINE: V24.3.5
-// Adds:
-//  - Results page: Global list shows a subtle bottom fade when scrollable
-//  - Fade auto-hides if not scrollable or when near bottom
-// Non-goals:
-//  - No changes to analytics, submissions, link clicks, routing, or global logic
+// Baseline: V24.3.6
+// Change: Island update toast is now content-change–based (no-op submits no longer trigger it)
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -602,6 +596,7 @@ if (isHomePage()) {
 
 const LAST_ISLAND_VIEW_AT_KEY = `splash_last_island_view_at:${listId}`;
 const LAST_SUBMIT_SUCCESS_AT_KEY  = 'splash_last_submit_success_at';
+const LAST_ISLAND_CONTENT_CHANGE_AT_KEY = 'splash_last_island_content_change_at';
 
 function readIsoTime(key){
   try {
@@ -634,9 +629,9 @@ if (isIslandPage()) {
   }
 
   // Quiet update signal for OWNER only (avoid confusing viewers)
-  const lastSubmitAt = readIsoTime(LAST_SUBMIT_SUCCESS_AT_KEY);
+ const lastChangeAt = readIsoTime(LAST_ISLAND_CONTENT_CHANGE_AT_KEY);
 
-  if (isIslandOwner && lastSubmitAt && (!prevIslandViewAt || lastSubmitAt > prevIslandViewAt)) {
+  if (isIslandOwner && lastChangeAt && (!prevIslandViewAt || lastChangeAt > prevIslandViewAt)) {
     toast('Your Island has been updated since your last visit.', 'info', 4200);
 
     logEvent('island_update_signal_shown', {
@@ -1997,7 +1992,7 @@ const meta = {
           .maybeSingle();
 
         const hadExisting = !!existingRow;
-        const changed = (hadExisting && !valuesEqualRow(existingRow, newValues));
+        const changed = (!hadExisting) || !valuesEqualRow(existingRow, newValues);
 
         if (!readErr && existingRow && valuesEqualRow(existingRow, newValues)) {
           const eligibleNewRaw = eligibleValuesForGlobal(category, newValues);
@@ -2013,6 +2008,7 @@ const meta = {
 // ✅ Home Island Gate: mark eligible after first successful submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
+try { localStorage.setItem('splash_last_island_content_change_at', new Date().toISOString()); } catch(e) {}
 
           window.location.href =
             window.location.origin +
