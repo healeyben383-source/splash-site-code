@@ -2008,7 +2008,6 @@ const meta = {
 // ✅ Home Island Gate: mark eligible after first successful submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
-try { localStorage.setItem('splash_last_island_content_change_at', new Date().toISOString()); } catch(e) {}
 
           window.location.href =
             window.location.origin +
@@ -2085,6 +2084,7 @@ try { localStorage.setItem('splash_last_island_content_change_at', new Date().to
 // ✅ Home Island Gate: reaffirm eligibility after successful edit submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
+try { localStorage.setItem('splash_last_island_content_change_at', new Date().toISOString()); } catch(e) {}
 
         window.location.href =
           window.location.origin +
