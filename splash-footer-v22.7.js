@@ -339,7 +339,17 @@ function sendSessionEnd(){
     const duration_ms = Math.max(0, Date.now() - (__SPLASH_SESSION_START__ || Date.now()));
 
     // Keep your existing pipeline (best-effort)
-    try { logEvent('session_end', { duration_ms }); } catch(e) {}
+ try {
+  const ENGAGED_THRESHOLD_MS = 15000;
+  const engaged = duration_ms >= ENGAGED_THRESHOLD_MS;
+
+  logEvent('session_end', {
+    duration_ms,
+    engaged,
+    engaged_threshold_ms: ENGAGED_THRESHOLD_MS
+  });
+} catch(e) {}
+
 
     // Hardened delivery on unload
     postSessionEndKeepalive(duration_ms);
