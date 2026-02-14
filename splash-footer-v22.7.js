@@ -166,6 +166,7 @@ async function postAnalyticsOneKeepalive(row){
   // BEGIN V24.3.13 ADD-ONLY — enforce analytics event_name allowlist
  const ANALYTICS_EVENT_ALLOWLIST = new Set([
   'visit',
+  'session_start',
   'results_view',
   'submit_click',
   'submit_error',
@@ -273,6 +274,24 @@ function getAttr(){
       flushQueue();
     } catch {}
   }
+  // BEGIN V24.3.16 ADD-ONLY — session_start (one per page load)
+let __SPLASH_SESSION_START_SENT__ = false;
+
+function sendSessionStart(){
+  try {
+    if (__SPLASH_SESSION_START_SENT__) return;
+    __SPLASH_SESSION_START_SENT__ = true;
+
+    logEvent('session_start', {
+      ts: new Date().toISOString()
+    });
+  } catch (e) {}
+}
+
+// Fire immediately on script load (and only once)
+try { sendSessionStart(); } catch (e) {}
+// END V24.3.16 ADD-ONLY
+
 // BEGIN V24.3.15 ADD-ONLY — Dwell time via session_end (HARDENED keepalive REST)
 let __SPLASH_SESSION_START__ = Date.now();
 let __SPLASH_SESSION_END_SENT__ = false;
