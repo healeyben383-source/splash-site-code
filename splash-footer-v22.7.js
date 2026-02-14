@@ -263,7 +263,7 @@ function getAttr(){
       const payload = {
         event_name,
         page: window.location.pathname || '',
-        category: meta.category || null,
+        category: (meta && typeof meta.category === 'string') ? meta.category : null,
         list_id: uuidOrNull(meta.list_id),
         session_id: getSessionId(),
         meta
