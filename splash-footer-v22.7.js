@@ -262,13 +262,14 @@ function getAttr(){
       } catch (e) {}
 
       const payload = {
-        event_name,
-        page: window.location.pathname || '',
-        category: (meta && typeof meta.category === 'string') ? meta.category : null,
-        list_id: uuidOrNull(meta.list_id),
-        session_id: getSessionId(),
-        meta
-      };
+  event_name,
+  page: window.location.pathname || '',
+  category: (meta && typeof meta.category === 'string') ? meta.category : null,
+  list_id: uuidOrNull(meta.list_id),
+  session_id: getSessionId(),
+  engaged: (meta && typeof meta.engaged === 'boolean') ? meta.engaged : null,
+  meta
+};
 
       enqueueEvent(payload);
       flushQueue();
@@ -296,18 +297,24 @@ try { sendSessionStart(); } catch (e) {}
 let __SPLASH_SESSION_START__ = Date.now();
 let __SPLASH_SESSION_END_SENT__ = false;
 
-function postSessionEndKeepalive(duration_ms){
+function postSessionEndKeepalive(duration_ms, engaged, engaged_threshold_ms){
   try {
     const endpoint = `${SUPABASE_URL}/rest/v1/analytics_events`;
 
     const payload = {
-      event_name: 'session_end',
-      page: window.location.pathname || '',
-      category: null,
-      list_id: null,
-      session_id: getSessionId(),
-      meta: { duration_ms }
-    };
+  event_name: 'session_end',
+  page: window.location.pathname || '',
+  category: null,
+  list_id: null,
+  session_id: getSessionId(),
+
+  // NEW: write to the real column
+  engaged: (typeof engaged === 'boolean') ? engaged : null,
+
+  // meta stays jsonb
+  meta: { duration_ms, engaged_threshold_ms }
+};
+
 
     // Attach first-touch attribution if available
     try {
@@ -338,23 +345,23 @@ function sendSessionEnd(){
 
     const duration_ms = Math.max(0, Date.now() - (__SPLASH_SESSION_START__ || Date.now()));
 
-    // Keep your existing pipeline (best-effort)
- try {
-  const ENGAGED_THRESHOLD_MS = 15000;
-  const engaged = duration_ms >= ENGAGED_THRESHOLD_MS;
+    try {
+      const ENGAGED_THRESHOLD_MS = 15000;
+      const engaged = duration_ms >= ENGAGED_THRESHOLD_MS;
 
-  logEvent('session_end', {
-    duration_ms,
-    engaged,
-    engaged_threshold_ms: ENGAGED_THRESHOLD_MS
-  });
-} catch(e) {}
+      logEvent('session_end', {
+        duration_ms,
+        engaged,
+        engaged_threshold_ms: ENGAGED_THRESHOLD_MS
+      });
 
+      postSessionEndKeepalive(duration_ms, engaged, ENGAGED_THRESHOLD_MS);
 
-    // Hardened delivery on unload
-    postSessionEndKeepalive(duration_ms);
+    } catch(e) {}
+
   } catch(e) {}
 }
+
 
 window.addEventListener('pagehide', sendSessionEnd, { passive: true });
 
