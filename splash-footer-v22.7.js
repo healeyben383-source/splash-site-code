@@ -273,9 +273,44 @@ function getAttr(){
       flushQueue();
     } catch {}
   }
-  // BEGIN V24.3.15 ADD-ONLY — Dwell time via session_end
+// BEGIN V24.3.15 ADD-ONLY — Dwell time via session_end (HARDENED keepalive REST)
 let __SPLASH_SESSION_START__ = Date.now();
 let __SPLASH_SESSION_END_SENT__ = false;
+
+function postSessionEndKeepalive(duration_ms){
+  try {
+    const endpoint = `${SUPABASE_URL}/rest/v1/analytics_events`;
+
+    const payload = {
+      event_name: 'session_end',
+      page: window.location.pathname || '',
+      category: null,
+      list_id: null,
+      session_id: getSessionId(),
+      meta: { duration_ms }
+    };
+
+    // Attach first-touch attribution if available
+    try {
+      const attr =
+        (typeof getAttr === 'function' ? getAttr() :
+         (typeof readAttr === 'function' ? readAttr() : null));
+      if (attr) payload.meta.attr = attr;
+    } catch(e) {}
+
+    fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_PUBLISHABLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(payload),
+      keepalive: true
+    }).catch(() => {});
+  } catch(e) {}
+}
 
 function sendSessionEnd(){
   try {
@@ -284,20 +319,18 @@ function sendSessionEnd(){
 
     const duration_ms = Math.max(0, Date.now() - (__SPLASH_SESSION_START__ || Date.now()));
 
-    logEvent('session_end', {
-      duration_ms
-    });
+    // Keep your existing pipeline (best-effort)
+    try { logEvent('session_end', { duration_ms }); } catch(e) {}
 
-    flushQueue();
-  } catch {}
+    // Hardened delivery on unload
+    postSessionEndKeepalive(duration_ms);
+  } catch(e) {}
 }
 
 window.addEventListener('pagehide', sendSessionEnd, { passive: true });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') {
-    sendSessionEnd();
-  }
+  if (document.visibilityState === 'hidden') sendSessionEnd();
 }, { passive: true });
 // END V24.3.15 ADD-ONLY
 
