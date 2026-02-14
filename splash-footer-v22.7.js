@@ -164,7 +164,7 @@ async function postAnalyticsOneKeepalive(row){
 
   window.addEventListener('pagehide', () => { flushQueue(); }, { passive: true });
   // BEGIN V24.3.13 ADD-ONLY — enforce analytics event_name allowlist
-  const ANALYTICS_EVENT_ALLOWLIST = new Set([
+ const ANALYTICS_EVENT_ALLOWLIST = new Set([
   'visit',
   'results_view',
   'submit_click',
@@ -176,8 +176,15 @@ async function postAnalyticsOneKeepalive(row){
   'island_return',
   'island_update_signal_shown',
   'repeat_conviction_event',
-  'conviction_prompt_shown'
+  'conviction_prompt_shown',
+
+  // V24.3.14 ADD-ONLY — share + dwell events
+  'share_click',
+  'share_success',
+  'share_fallback_prompt',
+  'session_end'
 ]);
+
 
 
   function coerceAllowedEventName(name){
