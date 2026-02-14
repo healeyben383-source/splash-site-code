@@ -273,6 +273,34 @@ function getAttr(){
       flushQueue();
     } catch {}
   }
+  // BEGIN V24.3.15 ADD-ONLY — Dwell time via session_end
+let __SPLASH_SESSION_START__ = Date.now();
+let __SPLASH_SESSION_END_SENT__ = false;
+
+function sendSessionEnd(){
+  try {
+    if (__SPLASH_SESSION_END_SENT__) return;
+    __SPLASH_SESSION_END_SENT__ = true;
+
+    const duration_ms = Math.max(0, Date.now() - (__SPLASH_SESSION_START__ || Date.now()));
+
+    logEvent('session_end', {
+      duration_ms
+    });
+
+    flushQueue();
+  } catch {}
+}
+
+window.addEventListener('pagehide', sendSessionEnd, { passive: true });
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    sendSessionEnd();
+  }
+}, { passive: true });
+// END V24.3.15 ADD-ONLY
+
 // BEGIN V24.3.12 ADD-ONLY — expose safe hooks for Island scripts
 try {
   // Allow other scripts (Island, prototypes) to log using the same queue/flush pipeline.
