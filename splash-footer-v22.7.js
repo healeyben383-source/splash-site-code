@@ -247,6 +247,18 @@ function getAttr(){
       if (!event_name) return;
       event_name = coerceAllowedEventName(event_name);
       if (!event_name) return;
+      // V24.3.14 ADD-ONLY — attach first-touch attribution to meta
+      try {
+        const attr = (typeof getAttr === 'function') ? getAttr() : null;
+
+        if (meta && typeof meta === 'object') {
+          if (!meta.attr && attr) {
+            meta.attr = attr;
+          }
+        } else {
+          meta = attr ? { attr } : {};
+        }
+      } catch (e) {}
 
       const payload = {
         event_name,
