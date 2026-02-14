@@ -192,6 +192,54 @@ async function postAnalyticsOneKeepalive(row){
     if (!n) return null;
     return ANALYTICS_EVENT_ALLOWLIST.has(n) ? n : null;
   }
+  // BEGIN V24.3.14 ADD-ONLY — Attribution capture (referrer + UTM) stored in meta.attr
+const ATTR_KEY = 'splash_attr_v1';
+
+function readAttr(){
+  try {
+    const raw = localStorage.getItem(ATTR_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeAttr(obj){
+  try { localStorage.setItem(ATTR_KEY, JSON.stringify(obj)); } catch {}
+}
+
+function getAttr(){
+  // Persist first-touch attribution (don’t overwrite later)
+  const existing = readAttr();
+  if (existing) return existing;
+
+  let ref = '';
+  try { ref = String(document.referrer || ''); } catch { ref = ''; }
+
+  let utm_source=null, utm_medium=null, utm_campaign=null, utm_content=null, utm_term=null;
+  try {
+    const u = new URL(window.location.href);
+    const p = u.searchParams;
+    utm_source   = p.get('utm_source');
+    utm_medium   = p.get('utm_medium');
+    utm_campaign = p.get('utm_campaign');
+    utm_content  = p.get('utm_content');
+    utm_term     = p.get('utm_term');
+  } catch {}
+
+  const attr = {
+    referrer: ref || null,
+    utm_source: utm_source || null,
+    utm_medium: utm_medium || null,
+    utm_campaign: utm_campaign || null,
+    utm_content: utm_content || null,
+    utm_term: utm_term || null,
+    captured_at: new Date().toISOString()
+  };
+
+  writeAttr(attr);
+  return attr;
+}
+// END V24.3.14 ADD-ONLY
+
   // END V24.3.13 ADD-ONLY
 
   function logEvent(event_name, meta = {}) {
