@@ -605,6 +605,21 @@ try {
   window.__SPLASH_TOAST__ = toast;
 } catch(e) {}
 // END V24.3.12 ADD-ONLY
+  function splashToastRecoveryKeyOnce(listId){
+  try {
+    const fn = window.__SPLASH_TOAST__;
+    if (typeof fn !== 'function') return;
+
+    const id = String(listId || '').trim();
+    if (!id) return;
+
+    const KEY = `splash_recovery_toast_shown_v1:${id}`;
+    if (localStorage.getItem(KEY)) return;
+
+    fn('Save your recovery key — you’ll need it if you switch devices.', 'info', 5200);
+    localStorage.setItem(KEY, '1');
+  } catch(e) {}
+}
 
   function setInlineError(formEl, msg){
     try {
@@ -2485,6 +2500,8 @@ try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOStri
           }, { onConflict: 'user_id,category' });
 
         if (upErr) throw upErr;
+        // Recovery key reminder (once per list/device)
+try { splashToastRecoveryKeyOnce(viewerListId); } catch(e) {}
 
         let added = [];
         let removed = [];
