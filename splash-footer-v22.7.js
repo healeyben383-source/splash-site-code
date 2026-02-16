@@ -90,11 +90,14 @@ function splashOpenRecoveryModal(){
   card.style.borderRadius = '16px';
   card.style.padding = '16px';
   card.style.boxShadow = '0 16px 50px rgba(0,0,0,0.25)';
+  card.style.maxHeight = '80vh';
+  card.style.overflow = 'auto';
+  card.style.boxSizing = 'border-box';
 
   card.innerHTML = `
     <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
     <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
-    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
+    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button id="splash-recovery-cancel" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);background:#fff;cursor:pointer;">Cancel</button>
       <button id="splash-recovery-go" style="padding:10px 12px;border-radius:10px;border:0;background:#9fd0cf;cursor:pointer;font-weight:600;">Recover</button>
