@@ -138,6 +138,14 @@ function splashOpenRecoveryModal(){
 
   setTimeout(() => card.querySelector('#splash-recovery-input')?.focus(), 50);
 }
+  // EXPORTS — Recovery Key V1 (so other scripts/buttons/console can call it)
+try {
+  window.splashOpenRecoveryModal = splashOpenRecoveryModal;
+  window.splashRegisterRecoveryKeyIfNeeded = splashRegisterRecoveryKeyIfNeeded;
+  window.splashResolveRecoveryKeyToListId = splashResolveRecoveryKeyToListId;
+} catch(e) {}
+
+  console.log('[Splash] Recovery Key V1 loaded');
 
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
