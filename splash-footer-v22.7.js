@@ -83,56 +83,7 @@ try {
     return null;
   }
 }
-function splashOpenRecoveryModal(){
-  if (document.getElementById('splash-recovery-modal')) return;
-
-  const wrap = document.createElement('div');
-  wrap.id = 'splash-recovery-modal';
-  wrap.style.position = 'fixed';
-  wrap.style.inset = '0';
-  wrap.style.background = 'rgba(0,0,0,0.45)';
-  wrap.style.zIndex = '999999';
-  wrap.style.display = 'flex';
-  wrap.style.alignItems = 'center';
-  wrap.style.justifyContent = 'center';
-  wrap.style.padding = '18px';
-
-  const card = document.createElement('div');
-  card.style.width = 'min(520px, 100%)';
-  card.style.background = '#fff';
-  card.style.borderRadius = '16px';
-  card.style.padding = '16px';
-  card.style.boxShadow = '0 16px 50px rgba(0,0,0,0.25)';
-  card.style.maxHeight = '80vh';
-  card.style.overflow = 'auto';
-  card.style.boxSizing = 'border-box';
-
-  card.innerHTML = `
-    <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
-    <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
-    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
-     <button id="splash-recovery-cancel"
-  style="display:inline-flex;align-items:center;justify-content:center;
-  padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);
-  background:#fff;cursor:pointer;color:rgba(0,0,0,.78);
-  font-size:14px;line-height:1.1;">
-  Cancel
-</button>
-
-<button id="splash-recovery-go"
-  style="display:inline-flex;align-items:center;justify-content:center;
-  padding:10px 12px;border-radius:10px;border:0;
-  background:#9fd0cf;cursor:pointer;font-weight:600;
-  color:rgba(0,0,0,.78);font-size:14px;line-height:1.1;">
-  Recover
-</button>
-    </div>
-    <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
-  `;
-
-  const close = () => { try { wrap.remove(); } catch(e){} };
-  function splashOpenRecoveryKeyRevealModal(listId, onDone) {
+ function splashOpenRecoveryKeyRevealModal(listId, onDone) {
   try {
     const id = String(listId || '').trim();
     if (!id) return;
@@ -209,6 +160,56 @@ function splashOpenRecoveryModal(){
     document.body.appendChild(wrap);
   } catch(e) {}
 }
+  
+function splashOpenRecoveryModal(){
+  if (document.getElementById('splash-recovery-modal')) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'splash-recovery-modal';
+  wrap.style.position = 'fixed';
+  wrap.style.inset = '0';
+  wrap.style.background = 'rgba(0,0,0,0.45)';
+  wrap.style.zIndex = '999999';
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.justifyContent = 'center';
+  wrap.style.padding = '18px';
+
+  const card = document.createElement('div');
+  card.style.width = 'min(520px, 100%)';
+  card.style.background = '#fff';
+  card.style.borderRadius = '16px';
+  card.style.padding = '16px';
+  card.style.boxShadow = '0 16px 50px rgba(0,0,0,0.25)';
+  card.style.maxHeight = '80vh';
+  card.style.overflow = 'auto';
+  card.style.boxSizing = 'border-box';
+
+  card.innerHTML = `
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
+    <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
+    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+     <button id="splash-recovery-cancel"
+  style="display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);
+  background:#fff;cursor:pointer;color:rgba(0,0,0,.78);
+  font-size:14px;line-height:1.1;">
+  Cancel
+</button>
+
+<button id="splash-recovery-go"
+  style="display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 12px;border-radius:10px;border:0;
+  background:#9fd0cf;cursor:pointer;font-weight:600;
+  color:rgba(0,0,0,.78);font-size:14px;line-height:1.1;">
+  Recover
+</button>
+    </div>
+    <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
+  `;
+
+  const close = () => { try { wrap.remove(); } catch(e){} };
 
 
   wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
@@ -254,6 +255,7 @@ try {
   window.splashOpenRecoveryModal = splashOpenRecoveryModal;
   window.splashRegisterRecoveryKeyIfNeeded = splashRegisterRecoveryKeyIfNeeded;
   window.splashResolveRecoveryKeyToListId = splashResolveRecoveryKeyToListId;
+  window.splashOpenRecoveryKeyRevealModal = splashOpenRecoveryKeyRevealModal;
 } catch(e) {}
 
   console.log('[Splash] Recovery Key V1 loaded');
@@ -2673,10 +2675,28 @@ try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
 try { localStorage.setItem('splash_last_island_content_change_at', new Date().toISOString()); } catch(e) {}
 
-        window.location.href =
-          window.location.origin +
-          RESULTS_PATH +
-          `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
+       const dest =
+  window.location.origin +
+  RESULTS_PATH +
+  `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
+
+try {
+  const seenKey = `splash_recovery_reveal_shown_v1:${viewerListId}`;
+
+  if (!localStorage.getItem(seenKey)) {
+    localStorage.setItem(seenKey, '1');
+
+    splashOpenRecoveryKeyRevealModal(viewerListId, () => {
+      window.location.href = dest;
+    });
+
+    return; // IMPORTANT — prevents immediate redirect
+  }
+} catch(e) {}
+
+// fallback (already seen reveal before)
+window.location.href = dest;
+return;
 
       } catch (err) {
         // ✅ V24.3.4 retained: better offline messaging (works with DevTools Offline)
