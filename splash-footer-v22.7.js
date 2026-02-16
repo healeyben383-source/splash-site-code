@@ -116,24 +116,66 @@ try {
     card.style.boxSizing = 'border-box';
 
     card.innerHTML = `
-      <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Save your recovery key</div>
-      <div style="opacity:.72;font-size:13px;margin-bottom:12px;">
-        You’ll need this if you switch devices or clear your browser.
-      </div>
+  <div style="font-weight:700;font-size:16px;margin-bottom:8px;color:rgba(0,0,0,.85);">
+    Save your recovery key
+  </div>
 
-      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid rgba(0,0,0,.14);border-radius:12px;padding:12px 12px;margin-bottom:12px;">
-        <div id="splash-recovery-reveal-key" style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;font-size:13px;overflow:auto;white-space:nowrap;max-width:100%;">${key}</div>
-        <button id="splash-recovery-reveal-copy" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);background:#fff;cursor:pointer;font-weight:600;">Copy</button>
-      </div>
+  <div style="opacity:.72;font-size:13px;margin-bottom:12px;color:rgba(0,0,0,.75);">
+    You’ll need this if you switch devices or clear your browser.
+  </div>
 
-      <div id="splash-recovery-reveal-status" style="margin-top:6px;font-size:13px;opacity:.75;"></div>
+  <div style="
+    display:flex;
+    gap:10px;
+    align-items:center;
+    border:1px solid rgba(0,0,0,.14);
+    border-radius:12px;
+    padding:12px;
+    margin-bottom:12px;
+  ">
+    <div id="splash-recovery-reveal-key" style="
+      flex:1 1 auto;
+      min-width:0;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      font-size:13px;
+      color:rgba(0,0,0,.85);
+      overflow:auto;
+      white-space:nowrap;
+    ">${key}</div>
 
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">
-        <button id="splash-recovery-reveal-done" style="padding:10px 12px;border-radius:10px;border:0;background:#9fd0cf;cursor:pointer;font-weight:700;color:rgba(0,0,0,.78);">
-          I saved it
-        </button>
-      </div>
-    `;
+    <button id="splash-recovery-reveal-copy" style="
+      flex:0 0 auto;
+      white-space:nowrap;
+      padding:10px 12px;
+      border-radius:10px;
+      border:1px solid rgba(0,0,0,.14);
+      background:#fff;
+      cursor:pointer;
+      font-weight:600;
+      font-size:14px;
+      line-height:1.1;
+      color:rgba(0,0,0,.80);
+    ">Copy</button>
+  </div>
+
+  <div id="splash-recovery-reveal-status" style="margin-top:6px;font-size:13px;opacity:.75;color:rgba(0,0,0,.75);"></div>
+
+  <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">
+    <button id="splash-recovery-reveal-done" style="
+      flex:0 0 auto;
+      white-space:nowrap;
+      padding:10px 12px;
+      border-radius:10px;
+      border:0;
+      background:#9fd0cf;
+      cursor:pointer;
+      font-weight:700;
+      font-size:14px;
+      line-height:1.1;
+      color:rgba(0,0,0,.78);
+    ">I saved it</button>
+  </div>
+`;
 
     const close = () => {
       try { wrap.remove(); } catch(e) {}
