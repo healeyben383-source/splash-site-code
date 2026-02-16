@@ -737,6 +737,15 @@ if (isHomePage()) {
   const isIslandOwner = !isIslandPage()
     ? true
     : ((islandListId || viewerListId) === viewerListId);
+  
+// BEGIN V24.3.17 ADD-ONLY — Resolved Identity Export
+try {
+  window.__SPLASH_VIEWER_LIST_ID__   = viewerListId || null;   // device/local identity
+  window.__SPLASH_URL_LIST_ID__      = islandListId || null;   // ?listId=... when on /island
+  window.__SPLASH_ACTIVE_LIST_ID__   = listId || null;         // fetch key (URL wins on /island)
+  window.__SPLASH_IS_ISLAND_OWNER__  = !!isIslandOwner;        // owner boolean
+} catch (e) {}
+// END V24.3.17 ADD-ONLY
 
   /* =========================
      VISIT (one per page load)
@@ -796,7 +805,7 @@ if (isIslandPage()) {
  const lastChangeAt = readIsoTime(LAST_ISLAND_CONTENT_CHANGE_AT_KEY);
 
   if (isIslandOwner && lastChangeAt && (!prevIslandViewAt || lastChangeAt > prevIslandViewAt)) {
-    toast('Your Island has been updated since your last visit.', 'info', 4200);
+   toast('Your Island evolved since your last visit.', 'info', 4200);
 
     logEvent('island_update_signal_shown', {
       list_id: listId
