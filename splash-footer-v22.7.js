@@ -183,7 +183,14 @@ try {
     };
 
     // IMPORTANT: do NOT close on backdrop click (force intent)
-    wrap.addEventListener('click', (e) => { e.stopPropagation(); }, { capture: true });
+   wrap.addEventListener('click', (e) => {
+  // Only intercept clicks on the backdrop itself (not on the card/buttons)
+  if (e.target === wrap) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, { passive: false });
+
 
     card.querySelector('#splash-recovery-reveal-copy').addEventListener('click', async () => {
       const status = card.querySelector('#splash-recovery-reveal-status');
@@ -250,6 +257,7 @@ function splashOpenRecoveryModal(){
     </div>
     <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
   `;
+  card.addEventListener('click', (e) => e.stopPropagation());
 
   const close = () => { try { wrap.remove(); } catch(e){} };
 
