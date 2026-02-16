@@ -59,6 +59,19 @@ async function splashResolveRecoveryKeyToListId(key){
   try {
     const k = splashNormalizeKey(key);
     if (!k) return null;
+   // Accept raw UUID or "SPLASH-<uuid>"
+try {
+  const raw = String(k || '').trim();
+
+  // raw UUID
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (uuidRe.test(raw)) return raw;
+
+  // SPLASH-UUID
+  const m = raw.match(/^splash-([0-9a-f-]{36})$/i);
+  if (m && uuidRe.test(m[1])) return m[1];
+
+} catch(e) {}
 
     const { data, error } = await supabase.rpc('resolve_recovery_key', {
       p_recovery_key: k
@@ -119,6 +132,84 @@ function splashOpenRecoveryModal(){
   `;
 
   const close = () => { try { wrap.remove(); } catch(e){} };
+  function splashOpenRecoveryKeyRevealModal(listId, onDone) {
+  try {
+    const id = String(listId || '').trim();
+    if (!id) return;
+
+    // prevent double
+    if (document.getElementById('splash-recovery-reveal-wrap')) return;
+
+    const key = `SPLASH-${id}`;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'splash-recovery-reveal-wrap';
+    wrap.style.position = 'fixed';
+    wrap.style.left = '0';
+    wrap.style.top = '0';
+    wrap.style.right = '0';
+    wrap.style.bottom = '0';
+    wrap.style.background = 'rgba(0,0,0,0.45)';
+    wrap.style.zIndex = '999999';
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.padding = '18px';
+
+    const card = document.createElement('div');
+    card.style.width = 'min(560px, 100%)';
+    card.style.background = '#fff';
+    card.style.borderRadius = '16px';
+    card.style.padding = '18px';
+    card.style.boxShadow = '0 16px 50px rgba(0,0,0,0.25)';
+    card.style.boxSizing = 'border-box';
+
+    card.innerHTML = `
+      <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Save your recovery key</div>
+      <div style="opacity:.72;font-size:13px;margin-bottom:12px;">
+        You’ll need this if you switch devices or clear your browser.
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid rgba(0,0,0,.14);border-radius:12px;padding:12px 12px;margin-bottom:12px;">
+        <div id="splash-recovery-reveal-key" style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;font-size:13px;overflow:auto;white-space:nowrap;max-width:100%;">${key}</div>
+        <button id="splash-recovery-reveal-copy" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);background:#fff;cursor:pointer;font-weight:600;">Copy</button>
+      </div>
+
+      <div id="splash-recovery-reveal-status" style="margin-top:6px;font-size:13px;opacity:.75;"></div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">
+        <button id="splash-recovery-reveal-done" style="padding:10px 12px;border-radius:10px;border:0;background:#9fd0cf;cursor:pointer;font-weight:700;color:rgba(0,0,0,.78);">
+          I saved it
+        </button>
+      </div>
+    `;
+
+    const close = () => {
+      try { wrap.remove(); } catch(e) {}
+      try { onDone && onDone(); } catch(e) {}
+    };
+
+    // IMPORTANT: do NOT close on backdrop click (force intent)
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); }, { capture: true });
+
+    card.querySelector('#splash-recovery-reveal-copy').addEventListener('click', async () => {
+      const status = card.querySelector('#splash-recovery-reveal-status');
+      try {
+        await navigator.clipboard.writeText(key);
+        status.textContent = 'Copied.';
+      } catch(e) {
+        // fallback select
+        status.textContent = 'Copy failed — select and copy manually.';
+      }
+    });
+
+    card.querySelector('#splash-recovery-reveal-done').addEventListener('click', close);
+
+    wrap.appendChild(card);
+    document.body.appendChild(wrap);
+  } catch(e) {}
+}
+
 
   wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
   card.querySelector('#splash-recovery-cancel').addEventListener('click', close);
@@ -2480,11 +2571,30 @@ const meta = {
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
 
-          window.location.href =
-            window.location.origin +
-            RESULTS_PATH +
-            `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
-          return;
+          // Redirect destination (same as before)
+const dest =
+  window.location.origin +
+  RESULTS_PATH +
+  `?category=${encodeURIComponent(category)}&listId=${encodeURIComponent(viewerListId)}`;
+
+// Show recovery key modal ONCE per listId/device, then redirect
+try {
+  const seenKey = `splash_recovery_reveal_shown_v1:${viewerListId}`;
+  if (!localStorage.getItem(seenKey)) {
+    localStorage.setItem(seenKey, '1');
+
+    splashOpenRecoveryKeyRevealModal(viewerListId, () => {
+      window.location.href = dest;
+    });
+
+    return; // IMPORTANT: prevent immediate redirect
+  }
+} catch(e) {}
+
+// fallback: normal redirect
+window.location.href = dest;
+return;
+
         }
 
         const { error: upErr } = await supabase
@@ -2500,8 +2610,6 @@ try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOStri
           }, { onConflict: 'user_id,category' });
 
         if (upErr) throw upErr;
-        // Recovery key reminder (once per list/device)
-try { splashToastRecoveryKeyOnce(viewerListId); } catch(e) {}
 
         let added = [];
         let removed = [];
