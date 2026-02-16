@@ -121,11 +121,15 @@ function splashOpenRecoveryModal(){
       return;
     }
 
-    // restore ownership marker
-    localStorage.setItem('splash_list_id', listId);
+   // restore ownership marker
+localStorage.setItem('splash_list_id', listId);
 
-    // also store the key locally (so they can see it later)
-    localStorage.setItem('splash_recovery_key_v1', splashNormalizeKey(key));
+// ✅ mark as not-first-time (fixes “first time on splash” behaviour)
+localStorage.setItem('splash_has_submitted_top5', '1');
+localStorage.setItem('splash_last_submit_success_at', new Date().toISOString());
+
+// also store the key locally (so they can see it later)
+localStorage.setItem('splash_recovery_key_v1', splashNormalizeKey(key));
 
     status.textContent = 'Recovered. Loading your Island…';
     setTimeout(() => {
