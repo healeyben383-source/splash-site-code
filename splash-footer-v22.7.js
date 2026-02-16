@@ -738,6 +738,14 @@ function getHomeIslandButtons(){
   ));
 }
 
+/* =========================
+   HOME "YOUR ISLAND" VISIBILITY GATE — V24.3.18 (ADD-ONLY)
+   Change:
+   - If NOT eligible (no submit yet), show a button that says:
+     "Have a recovery key?"
+   - Clicking opens splashOpenRecoveryModal()
+   - If eligible, restore original button behavior/text
+========================= */
 function applyHomeIslandGate(){
   try {
     if (!isHomePage()) return;
@@ -748,18 +756,62 @@ function applyHomeIslandGate(){
     const allowed = hasSubmittedOnce();
 
     btns.forEach((btn) => {
+      // Cache original state once
+      if (!btn.dataset.__splashOrigText) btn.dataset.__splashOrigText = (btn.textContent || '').trim();
+      if (!btn.dataset.__splashOrigHref && btn.tagName === 'A') btn.dataset.__splashOrigHref = btn.getAttribute('href') || '';
+
+      // Remove any previous recovery handler (safe idempotent pattern)
+      if (btn.__SPLASH_RECOVERY_BOUND__) {
+        try { btn.removeEventListener('click', btn.__SPLASH_RECOVERY_BOUND__); } catch(e) {}
+        btn.__SPLASH_RECOVERY_BOUND__ = null;
+      }
+
       if (!allowed) {
-        btn.style.display = 'none';
-        btn.setAttribute('aria-hidden', 'true');
-        btn.setAttribute('tabindex', '-1');
-      } else {
+        // SHOW as recovery entry point
         btn.style.display = '';
-        btn.removeAttribute('aria-hidden');
+        btn.setAttribute('aria-hidden', 'false');
         btn.removeAttribute('tabindex');
+
+        btn.textContent = 'Have a recovery key?';
+
+        // Prevent navigation if it's a link
+        if (btn.tagName === 'A') {
+          btn.setAttribute('href', '#');
+        }
+
+        // Bind click → open modal
+        const handler = (e) => {
+          try { e.preventDefault(); e.stopPropagation(); } catch(_){}
+          try {
+            if (typeof window.splashOpenRecoveryModal === 'function') {
+              window.splashOpenRecoveryModal();
+            }
+          } catch(e) {}
+        };
+
+        btn.__SPLASH_RECOVERY_BOUND__ = handler;
+        btn.addEventListener('click', handler, { passive: false });
+
+      } else {
+        // RESTORE normal button behavior
+        btn.style.display = '';
+        btn.setAttribute('aria-hidden', 'false');
+        btn.removeAttribute('tabindex');
+
+        // Restore text (or leave as-is if blank)
+        const origText = (btn.dataset.__splashOrigText || '').trim();
+        if (origText) btn.textContent = origText;
+
+        // Restore href if it was an anchor
+        if (btn.tagName === 'A') {
+          const origHref = btn.dataset.__splashOrigHref || '';
+          if (origHref) btn.setAttribute('href', origHref);
+        }
       }
     });
   } catch(e) {}
 }
+
 /* =========================
    HOME "YOUR ISLAND" GATE — HYBRID RESOLVER (V24.3.9 ADD-ONLY)
    Behavior:
