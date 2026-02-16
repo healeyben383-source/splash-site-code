@@ -15,6 +15,130 @@ document.addEventListener('DOMContentLoaded', () => {
   const supabase = window.__SPLASH_SUPABASE__ ||
     (window.__SPLASH_SUPABASE__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY));
 
+  /* ===========================================
+   RECOVERY KEY — V1 (ADD-ONLY)
+   - stores only a SHA-256 hash in DB (via RPC)
+   - keeps the raw key only on the user's device
+=========================================== */
+
+function splashMakeRecoveryKey(){
+  const part = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `SPLASH-${part()}${part()}-${part()}${part()}-${part()}${part()}`;
+}
+
+function splashNormalizeKey(k){
+  return String(k || '').trim();
+}
+
+async function splashRegisterRecoveryKeyIfNeeded(listId){
+  try {
+    if (!listId) return null;
+
+    const KEY_STORE = 'splash_recovery_key_v1';
+    const existing = localStorage.getItem(KEY_STORE);
+    if (existing) return existing;
+
+    const key = splashMakeRecoveryKey();
+
+    const { data, error } = await supabase.rpc('register_recovery_key', {
+      p_list_id: listId,
+      p_recovery_key: key
+    });
+
+    if (error) return null;
+    if (!data) return null;
+
+    localStorage.setItem(KEY_STORE, key);
+    return key;
+  } catch(e){
+    return null;
+  }
+}
+
+async function splashResolveRecoveryKeyToListId(key){
+  try {
+    const k = splashNormalizeKey(key);
+    if (!k) return null;
+
+    const { data, error } = await supabase.rpc('resolve_recovery_key', {
+      p_recovery_key: k
+    });
+
+    if (error) return null;
+    return data || null; // uuid or null
+  } catch(e){
+    return null;
+  }
+}
+function splashOpenRecoveryModal(){
+  if (document.getElementById('splash-recovery-modal')) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'splash-recovery-modal';
+  wrap.style.position = 'fixed';
+  wrap.style.inset = '0';
+  wrap.style.background = 'rgba(0,0,0,0.45)';
+  wrap.style.zIndex = '999999';
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.justifyContent = 'center';
+  wrap.style.padding = '18px';
+
+  const card = document.createElement('div');
+  card.style.width = 'min(520px, 100%)';
+  card.style.background = '#fff';
+  card.style.borderRadius = '16px';
+  card.style.padding = '16px';
+  card.style.boxShadow = '0 16px 50px rgba(0,0,0,0.25)';
+
+  card.innerHTML = `
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
+    <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
+    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button id="splash-recovery-cancel" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);background:#fff;cursor:pointer;">Cancel</button>
+      <button id="splash-recovery-go" style="padding:10px 12px;border-radius:10px;border:0;background:#9fd0cf;cursor:pointer;font-weight:600;">Recover</button>
+    </div>
+    <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
+  `;
+
+  const close = () => { try { wrap.remove(); } catch(e){} };
+
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  card.querySelector('#splash-recovery-cancel').addEventListener('click', close);
+
+  card.querySelector('#splash-recovery-go').addEventListener('click', async () => {
+    const input = card.querySelector('#splash-recovery-input');
+    const status = card.querySelector('#splash-recovery-status');
+    const key = input.value;
+
+    status.textContent = 'Checking key…';
+
+    const listId = await splashResolveRecoveryKeyToListId(key);
+
+    if (!listId) {
+      status.textContent = 'No match found. Check the key and try again.';
+      return;
+    }
+
+    // restore ownership marker
+    localStorage.setItem('splash_list_id', listId);
+
+    // also store the key locally (so they can see it later)
+    localStorage.setItem('splash_recovery_key_v1', splashNormalizeKey(key));
+
+    status.textContent = 'Recovered. Loading your Island…';
+    setTimeout(() => {
+      window.location.href = window.location.origin + '/island';
+    }, 350);
+  });
+
+  wrap.appendChild(card);
+  document.body.appendChild(wrap);
+
+  setTimeout(() => card.querySelector('#splash-recovery-input')?.focus(), 50);
+}
+
   /* =========================
      QW2 — ANALYTICS HELPER (FAIL-SILENT) + UUID HARDENING + QUEUE/FLUSH
   ========================== */
