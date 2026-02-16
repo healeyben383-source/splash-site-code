@@ -2386,6 +2386,12 @@ try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOStri
           removed: Array.isArray(removed) ? removed.length : 0,
           global_ok: globalOk
         });
+
+        // Register recovery key after real content change
+try {
+  await splashRegisterRecoveryKeyIfNeeded(viewerListId);
+} catch(e) {}
+
 // ✅ Home Island Gate: reaffirm eligibility after successful edit submit
 try { localStorage.setItem('splash_has_submitted_top5', '1'); } catch(e) {}
 try { localStorage.setItem('splash_last_submit_success_at', new Date().toISOString()); } catch(e) {}
