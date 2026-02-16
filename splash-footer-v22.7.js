@@ -778,19 +778,32 @@ function applyHomeIslandGate(){
         if (btn.tagName === 'A') {
           btn.setAttribute('href', '#');
         }
+        
+        try { btn.onclick = null; } catch(e) {}
+
 
         // Bind click → open modal
         const handler = (e) => {
-          try { e.preventDefault(); e.stopPropagation(); } catch(_){}
-          try {
-            if (typeof window.splashOpenRecoveryModal === 'function') {
-              window.splashOpenRecoveryModal();
-            }
-          } catch(e) {}
-        };
+  try {
+    e.preventDefault();
+    e.stopPropagation();
+    // ✅ this is the key: prevents other listeners on same element from running
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+  } catch(_) {}
 
-        btn.__SPLASH_RECOVERY_BOUND__ = handler;
-        btn.addEventListener('click', handler, { passive: false });
+  try {
+    if (typeof window.splashOpenRecoveryModal === 'function') {
+      window.splashOpenRecoveryModal();
+    }
+  } catch(e) {}
+};
+
+btn.__SPLASH_RECOVERY_BOUND__ = handler;
+
+// ✅ bind to pointerdown AND click, capture phase, so we win the race
+btn.addEventListener('pointerdown', handler, { passive: false, capture: true });
+btn.addEventListener('click', handler, { passive: false, capture: true });
+
 
       } else {
         // RESTORE normal button behavior
