@@ -98,9 +98,22 @@ function splashOpenRecoveryModal(){
     <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
     <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
     <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
-    <div style="display:flex;gap:10px;justify-content:flex-end;">
-      <button id="splash-recovery-cancel" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);background:#fff;cursor:pointer;">Cancel</button>
-      <button id="splash-recovery-go" style="padding:10px 12px;border-radius:10px;border:0;background:#9fd0cf;cursor:pointer;font-weight:600;">Recover</button>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+     <button id="splash-recovery-cancel"
+  style="display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.14);
+  background:#fff;cursor:pointer;color:rgba(0,0,0,.78);
+  font-size:14px;line-height:1.1;">
+  Cancel
+</button>
+
+<button id="splash-recovery-go"
+  style="display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 12px;border-radius:10px;border:0;
+  background:#9fd0cf;cursor:pointer;font-weight:600;
+  color:rgba(0,0,0,.78);font-size:14px;line-height:1.1;">
+  Recover
+</button>
     </div>
     <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
   `;
