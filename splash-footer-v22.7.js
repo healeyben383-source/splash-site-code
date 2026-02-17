@@ -127,21 +127,24 @@ try {
   <div style="
     display:flex;
     gap:10px;
-    align-items:center;
+   align-items:flex-start;
     border:1px solid rgba(0,0,0,.14);
     border-radius:12px;
     padding:12px;
     margin-bottom:12px;
   ">
-    <div id="splash-recovery-reveal-key" style="
-      flex:1 1 auto;
-      min-width:0;
-      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-      font-size:13px;
-      color:rgba(0,0,0,.85);
-      overflow:auto;
-      white-space:nowrap;
-    ">${key}</div>
+   <div id="splash-recovery-reveal-key" style="
+  flex:1 1 auto;
+  min-width:0;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size:13px;
+  color:rgba(0,0,0,.85);
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
+">${key}</div>
 
     <button id="splash-recovery-reveal-copy" style="
       flex:0 0 auto;
