@@ -1216,64 +1216,70 @@ if (isIslandPage()) {
   ========================== */
   const LAST_LIST_PREFIX = 'splash_last_';
 /* =========================
-   RECOVERY PREFILL HYDRATION — V1 (ADD-ONLY)
-   If a user recovered an Island (splash_list_id exists) on a new device,
-   hydrate local splash_last_<category> from DB so submit-page prefills work.
+   RECOVERY PREFILL HYDRATION — V2 (ADD-ONLY, FIXED)
+   Fix:
+   - Use formEl data-category (source of truth)
+   - Write to the same key prefill reads: splash_last_<data-category>
+   - Only runs on pages that actually contain a Top 5 form
 ========================== */
 
-function isSubmitCategoryPage(){
-  const p = String(window.location.pathname || '/').toLowerCase();
-  if (p === '/' || p.startsWith('/results') || p.startsWith('/island')) return false;
-  // assume first path segment is the category slug used in DB
-  const seg = p.replace(/^\/+/, '').split('/')[0];
-  return !!seg;
-}
-
-function getCategoryFromPath(){
-  const p = String(window.location.pathname || '/').toLowerCase();
-  const seg = p.replace(/^\/+/, '').split('/')[0];
-  return (seg || '').trim();
+function isTop5FormPage(){
+  try {
+    return !!document.querySelector('form input[name="rank1"]');
+  } catch(e) { return false; }
 }
 
 async function hydrateLocalLastTop5FromDBIfMissing(){
   try {
-    if (!isSubmitCategoryPage()) return;
-
-    const category = getCategoryFromPath();
-    if (!category) return;
+    if (!isTop5FormPage()) return;
 
     const listId = (typeof localStorage !== 'undefined')
       ? localStorage.getItem('splash_list_id')
       : null;
-
     if (!listId) return;
 
-    const key = 'splash_last_' + category;
-    const existing = localStorage.getItem(key);
-    if (existing) return; // already have local prefills
+    // Hydrate each Top5 form on the page (safe if only one)
+    const forms = Array.from(document.querySelectorAll('form'))
+      .filter(f => !!f.querySelector('input[name="rank1"]'));
 
-    // Pull latest saved list for this category
-    const { data, error } = await supabase
-      .from('lists')
-      .select('v1,v2,v3,v4,v5,updated_at,created_at')
-      .eq('user_id', listId)
-      .eq('category', category)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    for (const formEl of forms){
+      const category = String(formEl.getAttribute('data-category') || '').trim().toLowerCase();
+      if (!category) continue;
 
-    if (error || !data) return;
+      const key = 'splash_last_' + category;
 
-    const payload = {
-      rank1: data.v1 || '',
-      rank2: data.v2 || '',
-      rank3: data.v3 || '',
-      rank4: data.v4 || '',
-      rank5: data.v5 || '',
-      updatedAt: data.updated_at || data.created_at || new Date().toISOString()
-    };
+      // If we already have local prefills, don't touch them
+      const existing = localStorage.getItem(key);
+      if (existing) continue;
 
-    localStorage.setItem(key, JSON.stringify(payload));
+      // Pull latest saved list for THIS category
+      const { data, error } = await supabase
+        .from('lists')
+        .select('v1,v2,v3,v4,v5,updated_at,created_at')
+        .eq('user_id', listId)
+        .eq('category', category)
+        // updated_at is safest if present; created_at fallback
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) continue;
+
+      const payload = {
+        category,
+        rank1: data.v1 || '',
+        rank2: data.v2 || '',
+        rank3: data.v3 || '',
+        rank4: data.v4 || '',
+        rank5: data.v5 || '',
+        updatedAt: data.updated_at || data.created_at || new Date().toISOString()
+      };
+
+      try { localStorage.setItem(key, JSON.stringify(payload)); } catch(e) {}
+
+      // Immediately apply to the form if it's currently empty
+      try { applyLastListToForm(formEl); } catch(e) {}
+    }
   } catch (e) {
     // fail-soft
   }
