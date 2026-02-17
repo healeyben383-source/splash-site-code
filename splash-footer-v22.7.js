@@ -117,11 +117,11 @@ try {
 
     card.innerHTML = `
   <div style="font-weight:700;font-size:16px;margin-bottom:8px;color:rgba(0,0,0,.85);">
-    Save your recovery key
+    Save your Island key
   </div>
 
   <div style="opacity:.72;font-size:13px;margin-bottom:12px;color:rgba(0,0,0,.75);">
-    You’ll need this if you switch devices or clear your browser.
+    This lets you edit your Island on another device.
   </div>
 
   <div style="
@@ -238,9 +238,9 @@ function splashOpenRecoveryModal(){
   card.style.boxSizing = 'border-box';
 
   card.innerHTML = `
-    <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Recover your Island</div>
-    <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Paste your Recovery Key to restore your Island on this device.</div>
-    <input id="splash-recovery-input" placeholder="SPLASH-XXXX...." inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
+    <div style="font-weight:700;font-size:16px;margin-bottom:8px;">Restore your Island</div>
+    <div style="opacity:.72;font-size:13px;margin-bottom:12px;">Enter your Island key to edit your Island on this device.</div>
+    <input id="splash-recovery-input" placeholder="Enter your Island key" inputmode="text" autocapitalize="characters" spellcheck="false" style="width:100%;padding:12px;border:1px solid rgba(0,0,0,.18);border-radius:10px;margin-bottom:10px;font-size:14px;" />
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
      <button id="splash-recovery-cancel"
   style="display:inline-flex;align-items:center;justify-content:center;
@@ -255,7 +255,7 @@ function splashOpenRecoveryModal(){
   padding:10px 12px;border-radius:10px;border:0;
   background:#9fd0cf;cursor:pointer;font-weight:600;
   color:rgba(0,0,0,.78);font-size:14px;line-height:1.1;">
-  Recover
+  Restore
 </button>
     </div>
     <div id="splash-recovery-status" style="margin-top:10px;font-size:13px;opacity:.75;"></div>
@@ -949,7 +949,7 @@ function applyHomeIslandGate(){
         btn.setAttribute('aria-hidden', 'false');
         btn.removeAttribute('tabindex');
 
-        btn.textContent = 'Have a recovery key?';
+        btn.textContent = 'Have an Island key?';
 
         // Prevent navigation if it's a link
         if (btn.tagName === 'A') {
