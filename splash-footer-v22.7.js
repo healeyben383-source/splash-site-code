@@ -1267,74 +1267,7 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
     const payload = {
       rank1: data.v1 || '',
       rank2: data.v2 || '',
-      rank/* =========================
-   RECOVERY PREFILL HYDRATION — V1.1 (FIX)
-   Use form's data-category (true DB category), not URL segment.
-========================= */
-
-function getCategoryFromForm(){
-  try {
-    const formEl = document.querySelector('form[data-category]');
-    if (!formEl) return null;
-    const cat = String(formEl.getAttribute('data-category') || '').trim().toLowerCase();
-    return cat || null;
-  } catch(e){ return null; }
-}
-
-function isSubmitTop5Page(){
-  try {
-    // must have a rank1 input to be a submit page
-    return !!document.querySelector('form input[name="rank1"]');
-  } catch(e){ return false; }
-}
-
-async function hydrateLocalLastTop5FromDBIfMissing(){
-  try {
-    if (!isSubmitTop5Page()) return;
-
-    const category = getCategoryFromForm();
-    if (!category) return;
-
-    const listId = (typeof localStorage !== 'undefined')
-      ? localStorage.getItem('splash_list_id')
-      : null;
-
-    if (!listId) return;
-
-    // local key must match saveLastList() scheme
-    const key = 'splash_last_' + category;
-    const existing = localStorage.getItem(key);
-    if (existing) return; // already have local prefills
-
-    const { data, error } = await supabase
-      .from('lists')
-      .select('v1,v2,v3,v4,v5,updated_at,created_at')
-      .eq('user_id', listId)
-      .eq('category', category)
-      .limit(1)
-      .maybeSingle();
-
-    if (error || !data) return;
-
-    const payload = {
-      category,
-      rank1: data.v1 || '',
-      rank2: data.v2 || '',
       rank3: data.v3 || '',
-      rank4: data.v4 || '',
-      rank5: data.v5 || '',
-      updatedAt: data.updated_at || data.created_at || new Date().toISOString()
-    };
-
-    localStorage.setItem(key, JSON.stringify(payload));
-  } catch(e) {
-    // fail-soft
-  }
-}
-
-// Run once on page load
-try { hydrateLocalLastTop5FromDBIfMissing(); } catch(e) {}
-3: data.v3 || '',
       rank4: data.v4 || '',
       rank5: data.v5 || '',
       updatedAt: data.updated_at || data.created_at || new Date().toISOString()
