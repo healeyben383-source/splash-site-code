@@ -1256,15 +1256,13 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
       if (existing) continue;
 
       // Pull latest saved list for THIS category
-      const { data, error } = await supabase
-        .from('lists')
-        .select('v1,v2,v3,v4,v5,updated_at,created_at')
-        .eq('user_id', listId)
-        .eq('category', category)
-        // updated_at is safest if present; created_at fallback
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+     const { data, error } = await supabase
+  .rpc('get_latest_list_for_category', {
+    p_user_id: listId,
+    p_category: category
+  })
+  .maybeSingle();
+
 
       if (error || !data) continue;
 
@@ -2363,11 +2361,61 @@ function dedupeValuesForGlobalByCanonical(category, values){
 
       try {
         const { data, error } = await supabase
-          .from('lists')
-          .select('*')
-          .eq('user_id', listId)
-          .eq('category', category)
-          .maybeSingle();
+         const { data, error } = await supabase.rpc('get_list_row', {
+  p_user_id: listId,
+  p_category: category
+});
+const row = Array.isArray(data) ? data[0] : data;
+
+if (error) throw error;
+
+userList.innerHTML = '';
+
+if (row) {
+  [row.v1, row.v2, row.v3, row.v4, row.v5].forEach(v => {
+    if (!v) return;
+    const li = document.createElement('li');
+    styleRowLi(li);
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = v;
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = 'Open';
+    openBtn.setAttribute('data-di-open', '');
+
+    const links = resolveLinks(v, category);
+    const safe = (s) => (s || '').replace(/'/g, '');
+    const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
+    openBtn.setAttribute('data-di-links', payload);
+
+    const dispMeta = applyGlobalAliases(category, v);
+    let canonMeta = canonicalFromDisplay(dispMeta);
+    canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
+
+    const meta = {
+      category: category,
+      canonical_id: canonMeta,
+      display_name: dispMeta,
+      source: 'user_top5',
+      page: '/results',
+      list_id: viewerListId
+    };
+
+    openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
+    styleOpenButton(openBtn);
+
+    li.appendChild(textSpan);
+    li.appendChild(openBtn);
+    userList.appendChild(li);
+  });
+
+  if (!userList.children.length) userList.innerHTML = '<li>No items.</li>';
+} else {
+  userList.innerHTML = '<li>No saved list.</li>';
+}
+
 
         if (error) throw error;
 
@@ -2607,12 +2655,27 @@ const meta = {
       }
 
       try {
-        const { data: existingRow, error: readErr } = await supabase
-          .from('lists')
-          .select('v1,v2,v3,v4,v5')
-          .eq('user_id', viewerListId)
-          .eq('category', category)
-          .maybeSingle();
+      const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
+  p_user_id: viewerListId,
+  p_category: category
+});
+
+const existingRow = Array.isArray(rowData) ? rowData[0] : rowData;
+
+let key = localStorage.getItem('splash_recovery_key_v1');
+
+if (!key) {
+  key = splashMakeRecoveryKey();
+
+  const { data: regOk, error: regErr } = await supabase.rpc('register_recovery_key', {
+    p_list_id: viewerListId,
+    p_recovery_key: key
+  });
+
+  if (regErr || !regOk) throw new Error('could_not_create_island_key');
+
+  localStorage.setItem('splash_recovery_key_v1', key);
+}
 
         const hadExisting = !!existingRow;
         const changed = (!hadExisting) || !valuesEqualRow(existingRow, newValues);
@@ -2658,19 +2721,21 @@ return;
 
         }
 
-        const { error: upErr } = await supabase
-          .from('lists')
-          .upsert({
-            user_id: viewerListId,
-            category: category,
-            v1: newValues[0] || null,
-            v2: newValues[1] || null,
-            v3: newValues[2] || null,
-            v4: newValues[3] || null,
-            v5: newValues[4] || null
-          }, { onConflict: 'user_id,category' });
+      const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
+  p_recovery_key: key,
+  p_category: category,
+  p_v1: newValues[0] || null,
+  p_v2: newValues[1] || null,
+  p_v3: newValues[2] || null,
+  p_v4: newValues[3] || null,
+  p_v5: newValues[4] || null
+});
 
-        if (upErr) throw upErr;
+if (wErr) throw wErr;
+if (!wData || (wData.ok === false)) {
+  throw new Error((wData && wData.error) ? wData.error : 'save_failed');
+}
+
 
         let added = [];
         let removed = [];
