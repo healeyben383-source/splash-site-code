@@ -2510,7 +2510,7 @@ if (isResultsPage()) {
 
         const links = resolveLinks(label, category);
         const safe = (s) => (s || '').replace(/'/g, '');
-        const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bBtnLabel)}'}`;
+        const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
         // NOTE: if your resolveLinks uses bLabel/bUrl (not bBtnLabel), fix the line above to:
         // const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
 
