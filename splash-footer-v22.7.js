@@ -2353,231 +2353,83 @@ function dedupeValuesForGlobalByCanonical(category, values){
     });
 
     (async () => {
-      const category = urlParams.get('category') || '';
-      const userList = document.getElementById('userList');
-      if (!userList) return;
+  const category = urlParams.get('category') || '';
+  const userList = document.getElementById('userList');
+  if (!userList) return;
 
-      userList.innerHTML = '<li>Loading…</li>';
+  userList.innerHTML = '<li>Loading…</li>';
 
-     try {
-  const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
-    p_user_id: listId,
-    p_category: category
-  });
+  try {
+    const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
+     p_user_id: viewerListId,
+      p_category: category
+    });
 
-  if (readErr) throw readErr;
+    if (readErr) throw readErr;
 
-  const row = Array.isArray(rowData) ? rowData[0] : rowData;
+    const row = Array.isArray(rowData) ? rowData[0] : rowData;
 
+    userList.innerHTML = '';
 
-userList.innerHTML = '';
+    if (row) {
+      [row.v1, row.v2, row.v3, row.v4, row.v5].forEach(v => {
+        if (!v) return;
 
-if (row) {
-  [row.v1, row.v2, row.v3, row.v4, row.v5].forEach(v => {
-    if (!v) return;
-    const li = document.createElement('li');
-    styleRowLi(li);
+        const li = document.createElement('li');
+        styleRowLi(li);
 
-    const textSpan = document.createElement('span');
-    textSpan.textContent = v;
+        const textSpan = document.createElement('span');
+        textSpan.textContent = v;
 
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.textContent = 'Open';
-    openBtn.setAttribute('data-di-open', '');
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.textContent = 'Open';
+        openBtn.setAttribute('data-di-open', '');
 
-    const links = resolveLinks(v, category);
-    const safe = (s) => (s || '').replace(/'/g, '');
-    const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
-    openBtn.setAttribute('data-di-links', payload);
+        const links = resolveLinks(v, category);
+        const safe = (s) => (s || '').replace(/'/g, '');
+        const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
+        openBtn.setAttribute('data-di-links', payload);
 
-    const dispMeta = applyGlobalAliases(category, v);
-    let canonMeta = canonicalFromDisplay(dispMeta);
-    canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
+        const dispMeta = applyGlobalAliases(category, v);
+        let canonMeta = canonicalFromDisplay(dispMeta);
+        canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
 
-    const meta = {
-      category: category,
-      canonical_id: canonMeta,
-      display_name: dispMeta,
-      source: 'user_top5',
-      page: '/results',
-      list_id: viewerListId
-    };
+        const meta = {
+          category: category,
+          canonical_id: canonMeta,
+          display_name: dispMeta,
+          source: 'user_top5',
+          page: '/results',
+          list_id: viewerListId
+        };
 
-    openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
-    styleOpenButton(openBtn);
+        openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
+        styleOpenButton(openBtn);
 
-    li.appendChild(textSpan);
-    li.appendChild(openBtn);
-    userList.appendChild(li);
-  });
+        li.appendChild(textSpan);
+        li.appendChild(openBtn);
+        userList.appendChild(li);
+      });
 
-  if (!userList.children.length) userList.innerHTML = '<li>No items.</li>';
-} else {
-  userList.innerHTML = '<li>No saved list.</li>';
-}
-
-
-        if (error) throw error;
-
-        userList.innerHTML = '';
-
-        if (data) {
-          [data.v1, data.v2, data.v3, data.v4, data.v5].forEach(v => {
-            if (!v) return;
-
-            const li = document.createElement('li');
-            styleRowLi(li);
-
-            const textSpan = document.createElement('span');
-            textSpan.textContent = v;
-
-            const openBtn = document.createElement('button');
-            openBtn.type = 'button';
-            openBtn.textContent = 'Open';
-            openBtn.setAttribute('data-di-open', '');
-
-            const links = resolveLinks(v, category);
-            const safe = (s) => (s || '').replace(/'/g, '');
-            const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
-            openBtn.setAttribute('data-di-links', payload);
-
-           const dispMeta = applyGlobalAliases(category, v);
-let canonMeta = canonicalFromDisplay(dispMeta);
-canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
-
-const meta = {
-  category: category,
-  canonical_id: canonMeta,
-  display_name: dispMeta,
-  source: 'user_top5',
-  page: '/results',
-  list_id: viewerListId
-};
-
-            openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
-
-            styleOpenButton(openBtn);
-
-            li.appendChild(textSpan);
-            li.appendChild(openBtn);
-            userList.appendChild(li);
-          });
-
-          if (!userList.children.length) userList.innerHTML = '<li>No items.</li>';
-        } else {
-          userList.innerHTML = '<li>No saved list.</li>';
-        }
-
-        const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
-        if (probe) {
-          window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
-          window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
-        }
-      } catch (err) {
-        userList.innerHTML = '<li>Could not load your list. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
-        toast('Could not load your saved list.', 'error');
+      if (!userList.children.length) {
+        userList.innerHTML = '<li>No items.</li>';
       }
-    })();
+    } else {
+      userList.innerHTML = '<li>No saved list.</li>';
+    }
 
-    (async () => {
-      const category = urlParams.get('category') || '';
-      const globalMount = document.getElementById('globalList');
-      if (!globalMount) return;
+    const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
+    if (probe) {
+      window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
+      window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
+    }
+  } catch (err) {
+    userList.innerHTML = '<li>Could not load your list. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
+    toast('Could not load your saved list.', 'error');
+  }
+})();
 
-      globalMount.textContent = 'Loading…';
-
-      try {
-        const { data, error } = await supabase
-          .from('global_items')
-          .select('display_name, canonical_id, category, count')
-          .eq('category', category)
-          .order('count', { ascending: false })
-          .limit(100);
-
-        if (error) throw error;
-
-        if (!data || !data.length) {
-          globalMount.textContent = 'No global rankings yet.';
-          return;
-        }
-
-        const fs = window.__SPLASH_TOP5_FONTSIZE__;
-        const lh = window.__SPLASH_TOP5_LINEHEIGHT__;
-        if (fs) globalMount.style.fontSize = fs;
-        if (lh) globalMount.style.lineHeight = lh;
-
-        const ul = document.createElement('ul');
-
-        data.forEach((row, idx) => {
-          const label = row.display_name || row.canonical_id || 'Unknown';
-          const count = Number(row.count || 0);
-
-          const li = document.createElement('li');
-          styleRowLi(li);
-
-          const left = document.createElement('div');
-          left.className = 'di-g-left';
-
-          const rank = document.createElement('span');
-          rank.className = 'di-g-rank';
-          rank.textContent = String(idx + 1);
-
-          const name = document.createElement('span');
-          name.className = 'di-g-name';
-          name.textContent = label;
-
-          left.appendChild(rank);
-          left.appendChild(name);
-
-          const right = document.createElement('div');
-          right.className = 'di-g-right';
-
-          const countEl = document.createElement('span');
-          countEl.className = 'di-g-count';
-          countEl.textContent = String(count);
-
-          const openBtn = document.createElement('button');
-          openBtn.type = 'button';
-          openBtn.textContent = 'Open';
-          openBtn.setAttribute('data-di-open', '');
-
-          const links = resolveLinks(label, category);
-          const safe = (s) => (s || '').replace(/'/g, '');
-          const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
-          openBtn.setAttribute('data-di-links', payload);
-
-          const meta = {
-            category: category,
-            canonical_id: canonicalFromDisplay(label),
-            display_name: label,
-            source: 'global_top100',
-            page: '/results',
-            list_id: viewerListId
-          };
-          openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
-
-          styleOpenButton(openBtn);
-
-          right.appendChild(countEl);
-          right.appendChild(openBtn);
-
-          li.appendChild(left);
-          li.appendChild(right);
-          ul.appendChild(li);
-        });
-
-        globalMount.textContent = '';
-        globalMount.appendChild(ul);
-
-        // ✅ V24.3.6 add-only: visual scroll hint (fade-out at bottom)
-        setupGlobalListFade(globalMount);
-
-      } catch (err) {
-        globalMount.innerHTML = 'Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button>';
-        toast('Could not load Global Splash (Top 100).', 'error');
-      }
-    })();
   }
 
   /* =========================
