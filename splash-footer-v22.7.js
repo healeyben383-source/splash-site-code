@@ -2310,225 +2310,251 @@ function dedupeValuesForGlobalByCanonical(category, values){
     } catch {}
   }
 
-  /* =========================
-     RESULTS PAGE (render lists)
-  ========================== */
-  if (isResultsPage()) {
-    const getSubFromCategory = (category) => {
-      const parts = (category || '').split('-');
-      if (parts.length <= 1) return '';
-      return toTitleCase(parts.slice(1).join(' '));
-    };
+ /* =========================
+   RESULTS PAGE (render lists)
+========================== */
+if (isResultsPage()) {
+  const getSubFromCategory = (category) => {
+    const parts = (category || '').split('-');
+    if (parts.length <= 1) return '';
+    return toTitleCase(parts.slice(1).join(' '));
+  };
 
-    const setResultsCopy = () => {
-      const category = urlParams.get('category') || '';
-      const subLabel = getSubFromCategory(category) || 'Items';
+  const setResultsCopy = () => {
+    const category = urlParams.get('category') || '';
+    const subLabel = getSubFromCategory(category) || 'Items';
 
-      const userTitleEl   = document.getElementById('userListTitle');
-      const userDescEl    = document.getElementById('userListSubtext');
-      const globalTitleEl = document.getElementById('globalListTitle');
+    const userTitleEl   = document.getElementById('userListTitle');
+    const userDescEl    = document.getElementById('userListSubtext');
+    const globalTitleEl = document.getElementById('globalListTitle');
 
-      if (userTitleEl) userTitleEl.textContent = `Your Top 5 ${subLabel}`;
-      if (userDescEl)  userDescEl.textContent  = `If these were the only 5 ${subLabel.toLowerCase()} you could take… here’s what you chose.`;
-      if (globalTitleEl) globalTitleEl.textContent = `Global Splash (Top 100 ${subLabel})`;
-    };
+    if (userTitleEl) userTitleEl.textContent = `Your Top 5 ${subLabel}`;
+    if (userDescEl)  userDescEl.textContent  = `If these were the only 5 ${subLabel.toLowerCase()} you could take… here’s what you chose.`;
+    if (globalTitleEl) globalTitleEl.textContent = `Global Splash (Top 100 ${subLabel})`;
+  };
 
-    setResultsCopy();
+  setResultsCopy();
 
-    const __cat = (urlParams.get('category') || '').trim();
-    if (!__cat) {
-      toast('Missing category. Please go back and choose a category again.', 'error', 6500);
+  const __cat = (urlParams.get('category') || '').trim();
+  if (!__cat) {
+    toast('Missing category. Please go back and choose a category again.', 'error', 6500);
 
-      const userList = document.getElementById('userList');
-      const globalMount = document.getElementById('globalList');
+    const userList = document.getElementById('userList');
+    const globalMount = document.getElementById('globalList');
 
-      if (userList) userList.innerHTML = '<li>No category selected.</li>';
-      if (globalMount) globalMount.textContent = 'No category selected.';
-      return;
-    }
+    if (userList) userList.innerHTML = '<li>No category selected.</li>';
+    if (globalMount) globalMount.textContent = 'No category selected.';
+    return;
+  }
 
-    logEvent('results_view', {
-      category: (urlParams.get('category') || '').trim().toLowerCase() || null,
-      list_id: viewerListId
-    });
+  logEvent('results_view', {
+    category: (urlParams.get('category') || '').trim().toLowerCase() || null,
+    list_id: viewerListId
+  });
 
-    (async () => {
-  const category = urlParams.get('category') || '';
-  const userList = document.getElementById('userList');
-  if (!userList) return;
+  // -------------------------
+  // USER TOP 5 (Your list)
+  // -------------------------
+  (async () => {
+    const category = (urlParams.get('category') || '').trim();
+    const userList = document.getElementById('userList');
+    if (!userList) return;
 
-  userList.innerHTML = '<li>Loading…</li>';
+    userList.innerHTML = '<li>Loading…</li>';
 
-  try {
-    const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
-     p_user_id: viewerListId,
-      p_category: category
-    });
-
-    if (readErr) throw readErr;
-
-    const row = Array.isArray(rowData) ? rowData[0] : rowData;
-
-    userList.innerHTML = '';
-
-    if (row) {
-      [row.v1, row.v2, row.v3, row.v4, row.v5].forEach(v => {
-        if (!v) return;
-
-        const li = document.createElement('li');
-        styleRowLi(li);
-
-        const textSpan = document.createElement('span');
-        textSpan.textContent = v;
-
-        const openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.textContent = 'Open';
-        openBtn.setAttribute('data-di-open', '');
-
-        const links = resolveLinks(v, category);
-        const safe = (s) => (s || '').replace(/'/g, '');
-        const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
-        openBtn.setAttribute('data-di-links', payload);
-
-        const dispMeta = applyGlobalAliases(category, v);
-        let canonMeta = canonicalFromDisplay(dispMeta);
-        canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
-
-        const meta = {
-          category: category,
-          canonical_id: canonMeta,
-          display_name: dispMeta,
-          source: 'user_top5',
-          page: '/results',
-          list_id: viewerListId
-        };
-
-        openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
-        styleOpenButton(openBtn);
-
-        li.appendChild(textSpan);
-        li.appendChild(openBtn);
-        userList.appendChild(li);
+    try {
+      const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
+        p_user_id: viewerListId,
+        p_category: category
       });
 
-      if (!userList.children.length) {
-        userList.innerHTML = '<li>No items.</li>';
-      }
-    } else {
-      userList.innerHTML = '<li>No saved list.</li>';
-    }
+      if (readErr) throw readErr;
 
-    const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
-    if (probe) {
-      window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
-      window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
-    }
-  } catch (err) {
-    userList.innerHTML = '<li>Could not load your list. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
-    toast('Could not load your saved list.', 'error');
-  }
-})();
-    (async () => {
-      const category = urlParams.get('category') || '';
-      const globalMount = document.getElementById('globalList');
-      if (!globalMount) return;
+      const row = Array.isArray(rowData) ? rowData[0] : rowData;
 
-      globalMount.textContent = 'Loading…';
+      userList.innerHTML = '';
 
-      try {
-        const { data, error } = await supabase
-          .from('global_items')
-          .select('display_name, canonical_id, category, count')
-          .eq('category', category)
-          .order('count', { ascending: false })
-          .limit(100);
-
-        if (error) throw error;
-
-        if (!data || !data.length) {
-          globalMount.textContent = 'No global rankings yet.';
-          return;
-        }
-
-        const fs = window.__SPLASH_TOP5_FONTSIZE__;
-        const lh = window.__SPLASH_TOP5_LINEHEIGHT__;
-        if (fs) globalMount.style.fontSize = fs;
-        if (lh) globalMount.style.lineHeight = lh;
-
-        const ul = document.createElement('ul');
-
-        data.forEach((row, idx) => {
-          const label = row.display_name || row.canonical_id || 'Unknown';
-          const count = Number(row.count || 0);
+      if (row) {
+        [row.v1, row.v2, row.v3, row.v4, row.v5].forEach(v => {
+          if (!v) return;
 
           const li = document.createElement('li');
           styleRowLi(li);
 
-          const left = document.createElement('div');
-          left.className = 'di-g-left';
-
-          const rank = document.createElement('span');
-          rank.className = 'di-g-rank';
-          rank.textContent = String(idx + 1);
-
-          const name = document.createElement('span');
-          name.className = 'di-g-name';
-          name.textContent = label;
-
-          left.appendChild(rank);
-          left.appendChild(name);
-
-          const right = document.createElement('div');
-          right.className = 'di-g-right';
-
-          const countEl = document.createElement('span');
-          countEl.className = 'di-g-count';
-          countEl.textContent = String(count);
+          const textSpan = document.createElement('span');
+          textSpan.textContent = v;
 
           const openBtn = document.createElement('button');
           openBtn.type = 'button';
           openBtn.textContent = 'Open';
           openBtn.setAttribute('data-di-open', '');
 
-          const links = resolveLinks(label, category);
+          const links = resolveLinks(v, category);
           const safe = (s) => (s || '').replace(/'/g, '');
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
+          const dispMeta = applyGlobalAliases(category, v);
+          let canonMeta = canonicalFromDisplay(dispMeta);
+          canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
+
           const meta = {
             category: category,
-            canonical_id: canonicalFromDisplay(label),
-            display_name: label,
-            source: 'global_top100',
+            canonical_id: canonMeta,
+            display_name: dispMeta,
+            source: 'user_top5',
             page: '/results',
             list_id: viewerListId
           };
-          openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
 
+          openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
           styleOpenButton(openBtn);
 
-          right.appendChild(countEl);
-          right.appendChild(openBtn);
-
-          li.appendChild(left);
-          li.appendChild(right);
-          ul.appendChild(li);
+          li.appendChild(textSpan);
+          li.appendChild(openBtn);
+          userList.appendChild(li);
         });
 
-        globalMount.textContent = '';
-        globalMount.appendChild(ul);
-
-        // visual scroll hint (fade-out at bottom)
-        setupGlobalListFade(globalMount);
-
-      } catch (err) {
-        globalMount.innerHTML = 'Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button>';
-        toast('Could not load Global Splash (Top 100).', 'error');
+        if (!userList.children.length) {
+          userList.innerHTML = '<li>No items.</li>';
+        }
+      } else {
+        userList.innerHTML = '<li>No saved list.</li>';
       }
-    })();
 
-  }
+      // Capture typography for Global list to match
+      const probe = userList.querySelector('li span') || userList.querySelector('li') || userList;
+      if (probe) {
+        window.__SPLASH_TOP5_FONTSIZE__ = window.getComputedStyle(probe).fontSize;
+        window.__SPLASH_TOP5_LINEHEIGHT__ = window.getComputedStyle(probe).lineHeight;
+      }
+    } catch (err) {
+      userList.innerHTML =
+        '<li>Could not load your list. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
+      toast('Could not load your saved list.', 'error');
+    }
+  })();
+
+  // -------------------------
+  // GLOBAL SPLASH (Top 100)
+  // -------------------------
+  (async () => {
+    const category = (urlParams.get('category') || '').trim().toLowerCase();
+    const globalMount = document.getElementById('globalList');
+    if (!globalMount) return;
+
+    const isList = /^(UL|OL)$/.test(globalMount.tagName);
+
+    // loading state
+    if (isList) globalMount.innerHTML = '<li>Loading…</li>';
+    else globalMount.textContent = 'Loading…';
+
+    try {
+      const { data, error } = await supabase
+        .from('global_items')
+        .select('display_name, canonical_id, category, count')
+        .eq('category', category)
+        .order('count', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      if (!data || !data.length) {
+        if (isList) globalMount.innerHTML = '<li>No global rankings yet.</li>';
+        else globalMount.textContent = 'No global rankings yet.';
+        return;
+      }
+
+      // Match user list typography if captured
+      const fs = window.__SPLASH_TOP5_FONTSIZE__;
+      const lh = window.__SPLASH_TOP5_LINEHEIGHT__;
+      if (fs) globalMount.style.fontSize = fs;
+      if (lh) globalMount.style.lineHeight = lh;
+
+      // If #globalList is already a UL/OL, populate it directly; otherwise create UL
+      const listEl = isList ? globalMount : document.createElement('ul');
+      listEl.innerHTML = '';
+
+      data.forEach((row, idx) => {
+        const label = row.display_name || row.canonical_id || 'Unknown';
+        const count = Number(row.count || 0);
+
+        const li = document.createElement('li');
+        styleRowLi(li);
+
+        const left = document.createElement('div');
+        left.className = 'di-g-left';
+
+        const rank = document.createElement('span');
+        rank.className = 'di-g-rank';
+        rank.textContent = String(idx + 1);
+
+        const name = document.createElement('span');
+        name.className = 'di-g-name';
+        name.textContent = label;
+
+        left.appendChild(rank);
+        left.appendChild(name);
+
+        const right = document.createElement('div');
+        right.className = 'di-g-right';
+
+        const countEl = document.createElement('span');
+        countEl.className = 'di-g-count';
+        countEl.textContent = String(count);
+
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.textContent = 'Open';
+        openBtn.setAttribute('data-di-open', '');
+
+        const links = resolveLinks(label, category);
+        const safe = (s) => (s || '').replace(/'/g, '');
+        const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bBtnLabel)}'}`;
+        // NOTE: if your resolveLinks uses bLabel/bUrl (not bBtnLabel), fix the line above to:
+        // const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
+
+        openBtn.setAttribute('data-di-links', payload);
+
+        const meta = {
+          category: category,
+          canonical_id: canonicalFromDisplay(label),
+          display_name: label,
+          source: 'global_top100',
+          page: '/results',
+          list_id: viewerListId
+        };
+        openBtn.setAttribute('data-di-meta', JSON.stringify(meta));
+        styleOpenButton(openBtn);
+
+        right.appendChild(countEl);
+        right.appendChild(openBtn);
+
+        li.appendChild(left);
+        li.appendChild(right);
+        listEl.appendChild(li);
+      });
+
+      if (!isList) {
+        globalMount.textContent = '';
+        globalMount.appendChild(listEl);
+      }
+
+      // visual scroll hint (fade-out at bottom)
+      setupGlobalListFade(globalMount);
+
+    } catch (err) {
+      if (isList) {
+        globalMount.innerHTML =
+          '<li>Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button></li>';
+      } else {
+        globalMount.innerHTML =
+          'Could not load global rankings. <button type="button" style="margin-left:8px;cursor:pointer;" onclick="window.location.reload()">Retry</button>';
+      }
+      toast('Could not load Global Splash (Top 100).', 'error');
+    }
+  })();
+}
 
   /* =========================
      FORM SUBMISSION (OVERWRITE)
