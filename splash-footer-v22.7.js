@@ -2359,15 +2359,16 @@ function dedupeValuesForGlobalByCanonical(category, values){
 
       userList.innerHTML = '<li>Loading…</li>';
 
-      try {
-        const { data, error } = await supabase
-         const { data, error } = await supabase.rpc('get_list_row', {
-  p_user_id: listId,
-  p_category: category
-});
-const row = Array.isArray(data) ? data[0] : data;
+     try {
+  const { data: rowData, error: readErr } = await supabase.rpc('get_list_row', {
+    p_user_id: listId,
+    p_category: category
+  });
 
-if (error) throw error;
+  if (readErr) throw readErr;
+
+  const row = Array.isArray(rowData) ? rowData[0] : rowData;
+
 
 userList.innerHTML = '';
 
