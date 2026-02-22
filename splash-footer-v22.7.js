@@ -1827,17 +1827,72 @@ document.querySelectorAll('.share-button').forEach((btn) => {
    - Increment path: uses display → aliases → canonical override
    - Decrement path: aliases canonical variants to the unified canonical
 ========================== */
+/* =========================
+   GLOBAL ITEMS ALIASING (DB-DRIVEN) — V24.3.19 (FULL REPLACE OF ALIAS BLOCK)
+========================== */
+
 function normalizeAliasCategory(category){
   const c = String(category || '').trim().toLowerCase();
-
-  // normalize "family" categories (future-proof)
   if (c === 'music-genres'  || c.startsWith('music-genres-'))  return 'music-genres';
   if (c === 'music-artists' || c.startsWith('music-artists-')) return 'music-artists';
-
   return c;
 }
 
-function applyGlobalAliases(category, display) {
+function normalizeAliasKey(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Cache: category -> { byAlias: Map(aliasKey -> {canonical_id, canonical_display}), loadedAt:number }
+const __SPLASH_ALIAS_CACHE__ = new Map();
+const __SPLASH_ALIAS_TTL_MS__ = 1000 * 60 * 10; // 10 min
+
+async function loadAliasMapForCategory(category){
+  const cat = normalizeAliasCategory(category);
+  if (!cat) return new Map();
+
+  const now = Date.now();
+  const cached = __SPLASH_ALIAS_CACHE__.get(cat);
+  if (cached && cached.byAlias && (now - (cached.loadedAt || 0)) < __SPLASH_ALIAS_TTL_MS__) {
+    return cached.byAlias;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('item_aliases')
+      .select('alias, canonical_id, canonical_display')
+      .eq('category', cat)
+      .eq('is_active', true)
+      .limit(5000);
+
+    if (error) throw error;
+
+    const m = new Map();
+    (data || []).forEach((row) => {
+      const k = normalizeAliasKey(row.alias);
+      if (!k) return;
+      m.set(k, {
+        canonical_id: String(row.canonical_id || '').trim(),
+        canonical_display: row.canonical_display ? String(row.canonical_display).trim() : null
+      });
+    });
+
+    __SPLASH_ALIAS_CACHE__.set(cat, { byAlias: m, loadedAt: now });
+    return m;
+  } catch (e) {
+    if (cached && cached.byAlias) return cached.byAlias;
+    return new Map();
+  }
+}
+
+// Local fallback (keep tiny)
+function localManualAliasFallback(category, display){
   const cat = normalizeAliasCategory(category);
   const key = String(display || '').trim().toLowerCase().replace(/\s+/g,' ');
 
@@ -1848,61 +1903,41 @@ function applyGlobalAliases(category, display) {
       'prog roock': 'Progressive Rock',
       'progressive rock': 'Progressive Rock'
     },
-
-    // NOTE:
-    // This block is intentionally small and manual.
-    // Only add high-frequency, human-confirmed variants.
-    // Do NOT add fuzzy or broad rules here.
-    
-    // ✅ NEW: music artists cleanup (add-only, explicit mappings only)
     'music-artists': {
-      // Rolling Stones variants
       'rolling stone': 'The Rolling Stones',
       'rolling stones': 'The Rolling Stones',
       'the rolling stones': 'The Rolling Stones',
-
-      // Pink Floyd variants
       'pinkfloyd': 'Pink Floyd',
       'pink floyd': 'Pink Floyd',
-
-      // Smashing Pumpkins variants / typo
       'smashing punkins': 'The Smashing Pumpkins',
       'smashing pumpkins': 'The Smashing Pumpkins',
-      'the smashing pumpkins': 'The Smashing Pumpkins'
+      'the smashing pumpkins': 'The Smashing Pumpkins',
+      'led zep': 'Led Zeppelin'
     }
   };
 
   return (ALIASES[cat] && ALIASES[cat][key]) ? ALIASES[cat][key] : display;
 }
 
-function applyGlobalCanonicalAliases(category, canonical) {
+function localManualCanonicalFallback(category, canonical){
   const cat = normalizeAliasCategory(category);
   const canon = String(canonical || '').trim().toLowerCase();
 
-  // Canonical targets (must match what increment will produce)
   const CANON_ALIASES = {
     'music-genres': {
       'prog-rock': 'progressive-rock',
       'prog-roock': 'progressive-rock',
       'progressive-rock': 'progressive-rock'
     },
-
     'music-artists': {
-      // Rolling Stones
       'rolling-stone': 'the-rolling-stones',
       'rolling-stones': 'the-rolling-stones',
       'the-rolling-stones': 'the-rolling-stones',
-
-      // Pink Floyd
       'pinkfloyd': 'pink-floyd',
       'pink-floyd': 'pink-floyd',
-
-      // Led Zeppelin
       'led-zep': 'led-zeppelin',
       'led-zeppelin': 'led-zeppelin',
       'led-zepplin': 'led-zeppelin',
-
-      // Smashing Pumpkins
       'smashing-punkins': 'the-smashing-pumpkins',
       'smashing-pumpkins': 'the-smashing-pumpkins',
       'the-smashing-pumpkins': 'the-smashing-pumpkins'
@@ -1912,15 +1947,59 @@ function applyGlobalCanonicalAliases(category, canonical) {
   return (CANON_ALIASES[cat] && CANON_ALIASES[cat][canon]) ? CANON_ALIASES[cat][canon] : canonical;
 }
 
+async function resolveAliases(category, display){
+  const rawDisplay = String(display || '').trim();
+  if (!rawDisplay) return { display: rawDisplay, canon: '' };
+
+  const cat = normalizeAliasCategory(category);
+  const key = normalizeAliasKey(rawDisplay);
+
+  const map = await loadAliasMapForCategory(cat);
+  const hit = map.get(key);
+
+  if (hit && (hit.canonical_id || hit.canonical_display)) {
+    const resolvedDisplay = hit.canonical_display || rawDisplay;
+    const resolvedCanon = hit.canonical_id || canonicalFromDisplay(resolvedDisplay);
+    return { display: resolvedDisplay, canon: resolvedCanon };
+  }
+
+  const fallbackDisplay = localManualAliasFallback(cat, rawDisplay);
+  const fallbackCanon = canonicalFromDisplay(fallbackDisplay);
+  const finalCanon = localManualCanonicalFallback(cat, fallbackCanon);
+
+  return { display: fallbackDisplay, canon: finalCanon };
+}
+
+function resolveAliasesSyncBestEffort(category, display){
+  const rawDisplay = String(display || '').trim();
+  if (!rawDisplay) return { display: rawDisplay, canon: '' };
+
+  const cat = normalizeAliasCategory(category);
+  const key = normalizeAliasKey(rawDisplay);
+
+  const cached = __SPLASH_ALIAS_CACHE__.get(cat);
+  if (cached && cached.byAlias) {
+    const hit = cached.byAlias.get(key);
+    if (hit && (hit.canonical_id || hit.canonical_display)) {
+      const resolvedDisplay = hit.canonical_display || rawDisplay;
+      const resolvedCanon = hit.canonical_id || canonicalFromDisplay(resolvedDisplay);
+      return { display: resolvedDisplay, canon: resolvedCanon };
+    }
+  }
+
+  const fallbackDisplay = localManualAliasFallback(cat, rawDisplay);
+  const fallbackCanon = canonicalFromDisplay(fallbackDisplay);
+  const finalCanon = localManualCanonicalFallback(cat, fallbackCanon);
+
+  return { display: fallbackDisplay, canon: finalCanon };
+}
+
   async function incrementGlobalItemByCanonical(category, canonical, display){
-   let disp = normText(display);
-disp = applyGlobalAliases(category, disp);
+  const resolved = await resolveAliases(category, normText(display));
+let disp = normText(resolved.display);
 
-// Force canonical to match aliased display (prevents fragmentation)
-let canon = String(canonical || '').trim();
-const aliasCanon = canonicalFromDisplay(disp);
-if (aliasCanon) canon = aliasCanon;
-
+let canon = String(resolved.canon || canonical || '').trim();
+if (!canon) canon = canonicalFromDisplay(disp);
 if (!canon) return;
 
     const { data: existing, error: selErr } = await supabase
@@ -1986,7 +2065,7 @@ if (!canon) return;
     if (!canon) return;
 
     // Keep decrement aligned with increment aliasing (prevents count drift)
-    canon = applyGlobalCanonicalAliases(category, canon);
+   canon = resolveAliasesSyncBestEffort(category, canon).canon || canon;
 
     const { data: existing, error: selErr } = await supabase
       .from('global_items')
@@ -2185,15 +2264,10 @@ function dedupeValuesForGlobalByCanonical(category, values){
     const v = String(raw || '').trim();
     if (!v) return;
 
-    // Apply display aliasing first
-    const disp = applyGlobalAliases(category, v);
-
-    // Canonical from aliased display
-    let canon = canonicalFromDisplay(disp);
-    if (!canon) return;
-
-    // Canonical alias convergence
-    canon = applyGlobalCanonicalAliases(category, canon);
+   const resolved = resolveAliasesSyncBestEffort(category, v);
+const disp = resolved.display;
+let canon = resolved.canon || canonicalFromDisplay(disp);
+if (!canon) return;
 
     if (seen.has(canon)) return;
     seen.add(canon);
@@ -2398,9 +2472,9 @@ if (isResultsPage()) {
           const payload = `{'aLabel':'${safe(links.aLabel)}','aUrl':'${safe(links.aUrl)}','bLabel':'${safe(links.bLabel)}','bUrl':'${safe(links.bUrl)}'}`;
           openBtn.setAttribute('data-di-links', payload);
 
-          const dispMeta = applyGlobalAliases(category, v);
-          let canonMeta = canonicalFromDisplay(dispMeta);
-          canonMeta = applyGlobalCanonicalAliases(category, canonMeta);
+          const resolvedMeta = resolveAliasesSyncBestEffort(category, v);
+const dispMeta = resolvedMeta.display;
+let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
 
           const meta = {
             category: category,
@@ -2522,7 +2596,7 @@ if (isResultsPage()) {
 
         const meta = {
           category: category,
-          canonical_id: canonicalFromDisplay(label),
+         canonical_id: resolveAliasesSyncBestEffort(category, label).canon || canonicalFromDisplay(label),
           display_name: label,
           source: 'global_top100',
           page: '/results',
