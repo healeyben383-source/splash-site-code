@@ -59,20 +59,7 @@ async function splashResolveRecoveryKeyToListId(key){
   try {
     const k = splashNormalizeKey(key);
     if (!k) return null;
-   // Accept raw UUID or "SPLASH-<uuid>"
-try {
-  const raw = String(k || '').trim();
-
-  // raw UUID
-  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (uuidRe.test(raw)) return raw;
-
-  // SPLASH-UUID
-  const m = raw.match(/^splash-([0-9a-f-]{36})$/i);
-  if (m && uuidRe.test(m[1])) return m[1];
-
-} catch(e) {}
-
+  
     const { data, error } = await supabase.rpc('resolve_recovery_key', {
       p_recovery_key: k
     });
@@ -91,7 +78,11 @@ try {
     // prevent double
     if (document.getElementById('splash-recovery-reveal-wrap')) return;
 
-    const key = `SPLASH-${id}`;
+    const key = localStorage.getItem('splash_recovery_key_v1') || '';
+    if (!key) {
+  // fail-soft: no key available to show
+  return;
+}
 
     const wrap = document.createElement('div');
     wrap.id = 'splash-recovery-reveal-wrap';
@@ -762,7 +753,7 @@ try {
     const KEY = `splash_recovery_toast_shown_v1:${id}`;
     if (localStorage.getItem(KEY)) return;
 
-    fn('Save your recovery key — you’ll need it if you switch devices.', 'info', 5200);
+    fn('Save your Island key — you’ll need it if you switch devices.', 'info', 5200);
     localStorage.setItem(KEY, '1');
   } catch(e) {}
 }
@@ -938,10 +929,11 @@ function applyHomeIslandGate(){
       if (!btn.dataset.__splashOrigHref && btn.tagName === 'A') btn.dataset.__splashOrigHref = btn.getAttribute('href') || '';
 
       // Remove any previous recovery handler (safe idempotent pattern)
-      if (btn.__SPLASH_RECOVERY_BOUND__) {
-        try { btn.removeEventListener('click', btn.__SPLASH_RECOVERY_BOUND__); } catch(e) {}
-        btn.__SPLASH_RECOVERY_BOUND__ = null;
-      }
+     if (btn.__SPLASH_RECOVERY_HANDLER__) {
+  try { btn.removeEventListener('pointerdown', btn.__SPLASH_RECOVERY_HANDLER__, true); } catch(e) {}
+  try { btn.removeEventListener('click', btn.__SPLASH_RECOVERY_HANDLER__, true); } catch(e) {}
+  btn.__SPLASH_RECOVERY_HANDLER__ = null;
+}
 
       if (!allowed) {
         // SHOW as recovery entry point
@@ -975,9 +967,7 @@ function applyHomeIslandGate(){
   } catch(e) {}
 };
 
-btn.__SPLASH_RECOVERY_BOUND__ = handler;
-
-// ✅ bind to pointerdown AND click, capture phase, so we win the race
+btn.__SPLASH_RECOVERY_HANDLER__ = handler;
 btn.addEventListener('pointerdown', handler, { passive: false, capture: true });
 btn.addEventListener('click', handler, { passive: false, capture: true });
 
@@ -2065,7 +2055,7 @@ if (!canon) return;
     if (!canon) return;
 
     // Keep decrement aligned with increment aliasing (prevents count drift)
-   canon = resolveAliasesSyncBestEffort(category, canon).canon || canon;
+   canon = localManualCanonicalFallback(category, canon);
 
     const { data: existing, error: selErr } = await supabase
       .from('global_items')
