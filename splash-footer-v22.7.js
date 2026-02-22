@@ -1443,52 +1443,163 @@ document.querySelectorAll('.back-button').forEach((btn) => {
   });
 applyHomeIslandGate();
 
-  /* =========================
-     SHARE BUTTON (ISLAND) — OWNERSHIP LOCK
-  ========================== */
-  document.querySelectorAll('.share-button').forEach((btn) => {
+/* =========================
+   SHARE BUTTON (ISLAND) — OWNERSHIP LOCK + FIXED REVEAL (V24.3.19 FULL REPLACE)
+   Requires:
+   - Top-right fixed button has classes:  share-button share-button--fixed
+   - Bottom button has classes:          share-button share-button--bottom
+   Behavior:
+   - Owner: "Share my island" (fixed reveals after scroll; fixed is teal outline)
+   - Viewer: "Create your own Island" (fixed reveals after scroll; bottom hidden)
+========================== */
 
-   if (isIslandPage() && !isIslandOwner) {
-  btn.textContent = 'Make your own Splash';
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
+(function(){
+  try {
+    const all = Array.from(document.querySelectorAll('.share-button'));
+    if (!all.length) return;
 
-    // If they've already successfully submitted at least once on THIS browser,
-    // route them straight to THEIR island identity. Otherwise send them Home.
-    let allowed = false;
-    try { allowed = localStorage.getItem('splash_has_submitted_top5') === '1'; } catch (err) {}
+    const fixedBtn  = document.querySelector('.share-button.share-button--fixed');
+    const bottomBtn = document.querySelector('.share-button.share-button--bottom');
 
-    if (allowed) {
-      window.location.href =
-        window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
-    } else {
-      window.location.href = window.location.origin + '/';
-    }
-  });
-  return;
-}
-
-    btn.textContent = 'Share my island';
-
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-
-      const shareUrl = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
-      const original = 'Share my island';
-
+    // Helper: remove any prior binding safely (idempotent)
+    function resetBtn(btn){
+      if (!btn) return;
       try {
-        if (navigator.share) {
-          await navigator.share({ title: 'My Desert Island', text: 'A snapshot of what I’d take with me — captured in time.', url: shareUrl });
-          return;
+        if (btn.__SPLASH_SHARE_HANDLER__) {
+          btn.removeEventListener('click', btn.__SPLASH_SHARE_HANDLER__);
+          btn.__SPLASH_SHARE_HANDLER__ = null;
         }
-        await navigator.clipboard.writeText(shareUrl);
-        btn.textContent = 'Link copied';
-        setTimeout(() => (btn.textContent = original), 1200);
-      } catch (err) {
-        window.prompt('Copy this link:', shareUrl);
+      } catch(e) {}
+    }
+
+    const shareUrl = window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
+
+    // -----------------------------
+    // FIXED BUTTON STYLE + REVEAL
+    // -----------------------------
+    function styleFixedOutline(btn){
+      if (!btn) return;
+      btn.style.background = 'transparent';
+      btn.style.border = '1px solid rgba(20,150,150,.55)';
+      btn.style.color = 'rgba(20,150,150,.92)';
+      btn.style.boxShadow = '0 10px 26px rgba(0,0,0,.10)';
+      btn.style.backdropFilter = 'blur(10px)';
+    }
+
+    function enableFixedReveal(btn){
+      if (!btn) return;
+
+      const THRESH = 180; // px before reveal
+      const apply = () => {
+        const show = (window.scrollY || 0) > THRESH;
+        btn.style.opacity = show ? '1' : '0';
+        btn.style.pointerEvents = show ? 'auto' : 'none';
+        btn.style.transition = 'opacity 180ms ease';
+      };
+
+      if (!btn.__SPLASH_FIXED_REVEAL_BOUND__) {
+        btn.__SPLASH_FIXED_REVEAL_BOUND__ = true;
+        apply();
+        window.addEventListener('scroll', apply, { passive: true });
+        window.addEventListener('resize', apply, { passive: true });
+      } else {
+        apply();
       }
-    });
-  });
+    }
+
+    // -----------------------------
+    // VIEWER MODE (not owner)
+    // -----------------------------
+    function bindViewerCreate(btn){
+      if (!btn) return;
+      resetBtn(btn);
+
+      btn.textContent = 'Create your own Island';
+
+      const handler = (e) => {
+        e.preventDefault();
+
+        // If they've submitted at least once on this device, route to THEIR island.
+        let allowed = false;
+        try { allowed = localStorage.getItem('splash_has_submitted_top5') === '1'; } catch (err) {}
+
+        if (allowed) {
+          window.location.href =
+            window.location.origin + ISLAND_PATH + `?listId=${enc(viewerListId)}`;
+        } else {
+          window.location.href = window.location.origin + '/';
+        }
+      };
+
+      btn.__SPLASH_SHARE_HANDLER__ = handler;
+      btn.addEventListener('click', handler, { passive: false });
+    }
+
+    // -----------------------------
+    // OWNER MODE (share)
+    // -----------------------------
+    function bindOwnerShare(btn){
+      if (!btn) return;
+      resetBtn(btn);
+
+      btn.textContent = 'Share my island';
+
+      const handler = async (e) => {
+        e.preventDefault();
+
+        try {
+          if (navigator.share) {
+            await navigator.share({
+              title: 'My Desert Island',
+              text: 'A snapshot of what I’d take with me — captured in time.',
+              url: shareUrl
+            });
+            return;
+          }
+
+          await navigator.clipboard.writeText(shareUrl);
+          const original = 'Share my island';
+          btn.textContent = 'Link copied';
+          setTimeout(() => (btn.textContent = original), 1200);
+
+        } catch (err) {
+          window.prompt('Copy this link:', shareUrl);
+        }
+      };
+
+      btn.__SPLASH_SHARE_HANDLER__ = handler;
+      btn.addEventListener('click', handler, { passive: false });
+    }
+
+    // -----------------------------
+    // APPLY LOGIC
+    // -----------------------------
+    if (isIslandPage() && !isIslandOwner) {
+      // Hide bottom CTA so the fixed one is the single “create” affordance
+      if (bottomBtn) bottomBtn.style.display = 'none';
+
+      // If classes are missing, still fix wording/behavior for any share buttons
+      all.forEach(bindViewerCreate);
+
+      // Fixed CTA gets outline + reveal
+      if (fixedBtn) {
+        styleFixedOutline(fixedBtn);
+        enableFixedReveal(fixedBtn);
+      }
+
+      return;
+    }
+
+    // Owner mode
+    all.forEach(bindOwnerShare);
+
+    if (fixedBtn) {
+      styleFixedOutline(fixedBtn);
+      enableFixedReveal(fixedBtn);
+    }
+
+  } catch(e) {}
+})();
 
   /* =========================
      LINK RESOLVER (LOCKED 2-LINK MAP)
