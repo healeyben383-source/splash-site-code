@@ -1245,36 +1245,32 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
       const existing = localStorage.getItem(key);
       if (existing) continue;
 
-      // Pull latest saved list for THIS category
-     const { data, error } = await supabase
-  .rpc('get_latest_list_for_category', {
-    p_user_id: listId,
-    p_category: category
-  })
-  .maybeSingle();
+ // Pull latest saved list for THIS category
+const { data, error } = await supabase.rpc('get_latest_list_for_category', {
+  p_user_id: listId,
+  p_category: category
+});
 
+if (error || !data) continue;
 
-      if (error || !data) continue;
+// RPC may return object OR array depending on function definition
+const row = Array.isArray(data) ? data[0] : data;
+if (!row) continue;
 
-      const payload = {
-        category,
-        rank1: data.v1 || '',
-        rank2: data.v2 || '',
-        rank3: data.v3 || '',
-        rank4: data.v4 || '',
-        rank5: data.v5 || '',
-        updatedAt: data.updated_at || data.created_at || new Date().toISOString()
-      };
+const payload = {
+  category,
+  rank1: row.v1 || '',
+  rank2: row.v2 || '',
+  rank3: row.v3 || '',
+  rank4: row.v4 || '',
+  rank5: row.v5 || '',
+  updatedAt: row.updated_at || row.created_at || new Date().toISOString()
+};
 
-      try { localStorage.setItem(key, JSON.stringify(payload)); } catch(e) {}
+try { localStorage.setItem(key, JSON.stringify(payload)); } catch(e) {}
 
-      // Immediately apply to the form if it's currently empty
-      try { applyLastListToForm(formEl); } catch(e) {}
-    }
-  } catch (e) {
-    // fail-soft
-  }
-}
+// Immediately apply to the form if it's currently empty
+try { applyLastListToForm(formEl); } catch(e) {}
 
 // Run once on page load
 try { hydrateLocalLastTop5FromDBIfMissing(); } catch(e) {}
