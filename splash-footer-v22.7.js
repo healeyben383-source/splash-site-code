@@ -1274,16 +1274,15 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
       }
 
       // Pull latest saved list for THIS category
-      const { data, error } = await supabase.rpc('get_latest_list_for_category', {
-        p_user_id: listId,
-        p_category: category
-      });
+    const { data, error } = await supabase.rpc('get_list_row', {
+  p_user_id: listId,
+  p_category: category
+});
 
       if (error || !data) continue;
 
-      const row = __splashCoerceRpcRow(data);
-      if (!row) continue;
-
+      const row = Array.isArray(data) ? (data[0] || null) : (data || null);
+if (!row) continue;
       const payload = {
         category,
         rank1: row.v1 || '',
