@@ -1219,17 +1219,31 @@ if (isIslandPage()) {
   ========================== */
   const LAST_LIST_PREFIX = 'splash_last_';
 /* =========================
-   RECOVERY PREFILL HYDRATION — V2 (ADD-ONLY, FIXED)
-   Fix:
-   - Use formEl data-category (source of truth)
-   - Write to the same key prefill reads: splash_last_<data-category>
-   - Only runs on pages that actually contain a Top 5 form
+   RECOVERY PREFILL HYDRATION — V3 (FULL REPLACE OF V2)
+   Fixes:
+   - RPC shape hardening (array OR object)
+   - Removes .maybeSingle() (can null out array RPCs)
+   - Small retry loop for Webflow timing
+   - Writes to splash_last_<data-category> (same key prefill reads)
 ========================== */
 
 function isTop5FormPage(){
   try {
     return !!document.querySelector('form input[name="rank1"]');
   } catch(e) { return false; }
+}
+
+function __splashCoerceRpcRow(data){
+  try {
+    if (!data) return null;
+    // Many RPCs return arrays
+    if (Array.isArray(data)) return data[0] || null;
+    // Some return object
+    if (typeof data === 'object') return data;
+    return null;
+  } catch(e){
+    return null;
+  }
 }
 
 async function hydrateLocalLastTop5FromDBIfMissing(){
@@ -1239,6 +1253,7 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
     const listId = (typeof localStorage !== 'undefined')
       ? localStorage.getItem('splash_list_id')
       : null;
+
     if (!listId) return;
 
     // Hydrate each Top5 form on the page (safe if only one)
@@ -1251,29 +1266,32 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
 
       const key = 'splash_last_' + category;
 
-      // If we already have local prefills, don't touch them
-      const existing = localStorage.getItem(key);
-      if (existing) continue;
+      // If we already have local prefills (valid JSON), don't touch them
+      const existingRaw = localStorage.getItem(key);
+      if (existingRaw) {
+        // If it’s corrupted, allow overwrite
+        try { JSON.parse(existingRaw); continue; } catch(_) {}
+      }
 
       // Pull latest saved list for THIS category
-     const { data, error } = await supabase
-  .rpc('get_latest_list_for_category', {
-    p_user_id: listId,
-    p_category: category
-  })
-  .maybeSingle();
-
+      const { data, error } = await supabase.rpc('get_latest_list_for_category', {
+        p_user_id: listId,
+        p_category: category
+      });
 
       if (error || !data) continue;
 
+      const row = __splashCoerceRpcRow(data);
+      if (!row) continue;
+
       const payload = {
         category,
-        rank1: data.v1 || '',
-        rank2: data.v2 || '',
-        rank3: data.v3 || '',
-        rank4: data.v4 || '',
-        rank5: data.v5 || '',
-        updatedAt: data.updated_at || data.created_at || new Date().toISOString()
+        rank1: row.v1 || '',
+        rank2: row.v2 || '',
+        rank3: row.v3 || '',
+        rank4: row.v4 || '',
+        rank5: row.v5 || '',
+        updatedAt: row.updated_at || row.created_at || new Date().toISOString()
       };
 
       try { localStorage.setItem(key, JSON.stringify(payload)); } catch(e) {}
@@ -1286,8 +1304,45 @@ async function hydrateLocalLastTop5FromDBIfMissing(){
   }
 }
 
-// Run once on page load
-try { hydrateLocalLastTop5FromDBIfMissing(); } catch(e) {}
+// Run once on page load + a short retry loop (covers Webflow render timing)
+(function initRecoveryHydrationV3(){
+  try {
+    let tries = 0;
+    const maxTries = 8;     // ~2s total
+    const interval = 250;
+
+    const tick = async () => {
+      tries++;
+      try { await hydrateLocalLastTop5FromDBIfMissing(); } catch(e) {}
+
+      // Stop early if there are no Top5 forms
+      if (!isTop5FormPage()) {
+        if (tries < maxTries) return;
+        return;
+      }
+
+      // If at least one form now has any value, we’re done
+      try {
+        const anyFilled = Array.from(document.querySelectorAll('form'))
+          .filter(f => !!f.querySelector('input[name="rank1"]'))
+          .some(f => {
+            const inputs = [1,2,3,4,5].map(i => f.querySelector(`input[name="rank${i}"]`)).filter(Boolean);
+            return inputs.some(inp => String(inp.value || '').trim());
+          });
+
+        if (anyFilled) return;
+      } catch(e) {}
+
+      if (tries < maxTries) setTimeout(tick, interval);
+    };
+
+    // first attempt immediately
+    setTimeout(tick, 0);
+
+    // also on bfcache restore / back-forward navigation
+    window.addEventListener('pageshow', () => { try { tick(); } catch(e) {} }, { passive: true });
+  } catch(e) {}
+})();
 
   function lastListKey(category) { return LAST_LIST_PREFIX + String(category || '').trim().toLowerCase(); }
   function safeJsonParse(raw) { try { return JSON.parse(raw); } catch (e) { return null; } }
