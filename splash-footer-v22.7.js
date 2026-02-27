@@ -2445,12 +2445,23 @@ if (!canon) return;
  /* =========================
    RESULTS PAGE (render lists)
 ========================== */
-if (isResultsPage()) {
-  const getSubFromCategory = (category) => {
-    const parts = (category || '').split('-');
-    if (parts.length <= 1) return '';
-    return toTitleCase(parts.slice(1).join(' '));
-  };
+  if (isResultsPage()) {
+
+    const RESULTS_SUBLABEL_OVERRIDES = {
+      'games-video': 'Video Games'
+    };
+
+    const getSubFromCategory = (category) => {
+  const raw = String(category || '').trim().toLowerCase();
+
+  if (RESULTS_SUBLABEL_OVERRIDES[raw]) {
+    return RESULTS_SUBLABEL_OVERRIDES[raw];
+  }
+
+  const parts = raw.split('-');
+  if (parts.length <= 1) return '';
+  return toTitleCase(parts.slice(1).join(' '));
+};
 
   const setResultsCopy = () => {
     const category = urlParams.get('category') || '';
