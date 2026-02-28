@@ -2854,7 +2854,7 @@ return;
 
         }
 
-      const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
+  const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
   p_recovery_key: key,
   p_category: category,
   p_v1: newValues[0] || null,
@@ -2865,8 +2865,16 @@ return;
 });
 
 if (wErr) throw wErr;
-if (!wData || (wData.ok === false)) {
-  throw new Error((wData && wData.error) ? wData.error : 'save_failed');
+
+// ✅ Coerce RPC shape (array OR object OR null)
+const out = Array.isArray(wData) ? (wData[0] || null) : (wData || null);
+
+// If RPC returns nothing on success, treat as success
+if (out == null) {
+  // success
+} else {
+  if (out.ok === false) throw new Error(out.error || 'save_failed');
+  // otherwise treat as success
 }
 
 
