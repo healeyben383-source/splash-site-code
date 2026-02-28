@@ -647,11 +647,7 @@ function sendSessionEnd(){
       const ENGAGED_THRESHOLD_MS = 15000;
       const engaged = duration_ms >= ENGAGED_THRESHOLD_MS;
 
-      logEvent('session_end', {
-        duration_ms,
-        engaged,
-        engaged_threshold_ms: ENGAGED_THRESHOLD_MS
-      });
+    
 
       postSessionEndKeepalive(duration_ms, engaged, ENGAGED_THRESHOLD_MS);
 
@@ -938,10 +934,10 @@ function applyHomeIslandGate(){
       if (!btn.dataset.__splashOrigHref && btn.tagName === 'A') btn.dataset.__splashOrigHref = btn.getAttribute('href') || '';
 
       // Remove any previous recovery handler (safe idempotent pattern)
-      if (btn.__SPLASH_RECOVERY_BOUND__) {
-        try { btn.removeEventListener('click', btn.__SPLASH_RECOVERY_BOUND__); } catch(e) {}
-        btn.__SPLASH_RECOVERY_BOUND__ = null;
-      }
+     if (btn.__SPLASH_RECOVERY_BOUND__) {
+  try { btn.removeEventListener('click', btn.__SPLASH_RECOVERY_BOUND__, true); } catch(e) {}
+  btn.__SPLASH_RECOVERY_BOUND__ = null;
+}
 
       if (!allowed) {
         // SHOW as recovery entry point
@@ -978,7 +974,6 @@ function applyHomeIslandGate(){
 btn.__SPLASH_RECOVERY_BOUND__ = handler;
 
 // ✅ bind to pointerdown AND click, capture phase, so we win the race
-btn.addEventListener('pointerdown', handler, { passive: false, capture: true });
 btn.addEventListener('click', handler, { passive: false, capture: true });
 
 
