@@ -1073,15 +1073,22 @@ function initHomeIslandGateHybrid(viewerListId){
 
   // ✅ Note: V24.3.6 keeps your existing behavior. If you want true UUID-only here later, we can tighten it.
   function getOrCreateListId() {
-    let id = localStorage.getItem(LIST_ID_KEY);
-    if (!id) {
-      id = (window.crypto && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : (Date.now() + '-' + Math.random().toString(16).slice(2));
-      localStorage.setItem(LIST_ID_KEY, id);
-    }
-    return id;
+  let id = null;
+  try { id = localStorage.getItem(LIST_ID_KEY); } catch(e) {}
+
+  // If it's not a UUID, treat as missing (self-heal)
+  id = uuidOrNull(id);
+
+  if (!id) {
+    id = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : uuidv4Fallback();
+
+    try { localStorage.setItem(LIST_ID_KEY, id); } catch(e) {}
   }
+
+  return id;
+}
 
   const viewerListId = getOrCreateListId();
   
