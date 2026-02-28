@@ -216,7 +216,10 @@ try {
 
     wrap.appendChild(card);
     document.body.appendChild(wrap);
-  } catch(e) {}
+  } catch(e) {
+  // ✅ FAIL-OPEN: if modal can't render, continue flow (redirect happens via onDone)
+  try { onDone && onDone(); } catch(_) {}
+}
 }
   
 function splashOpenRecoveryModal(){
@@ -2843,7 +2846,12 @@ try {
     splashOpenRecoveryKeyRevealModal(viewerListId, () => {
       window.location.href = dest;
     });
-
+// ✅ fallback: if modal did not mount, redirect anyway
+setTimeout(() => {
+  if (!document.getElementById('splash-recovery-reveal-wrap')) {
+    window.location.href = dest;
+  }
+}, 50);
     return; // IMPORTANT: prevent immediate redirect
   }
 } catch(e) {}
@@ -2954,7 +2962,12 @@ try {
     splashOpenRecoveryKeyRevealModal(viewerListId, () => {
       window.location.href = dest;
     });
-
+// ✅ fallback: if modal did not mount, redirect anyway
+setTimeout(() => {
+  if (!document.getElementById('splash-recovery-reveal-wrap')) {
+    window.location.href = dest;
+  }
+}, 50);
     return; // IMPORTANT — prevents immediate redirect
   }
 } catch(e) {}
