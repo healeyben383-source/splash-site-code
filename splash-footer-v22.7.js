@@ -1,7 +1,13 @@
 // Baseline: V24.3.6
 // Change: Island update toast is now content-change–based (no-op submits no longer trigger it)
 
-document.addEventListener('DOMContentLoaded', () => {
+// ✅ SPLASH FOOTER RUN-ONCE GUARD — V24.3.21 (ADD-ONLY)
+if (window.__SPLASH_FOOTER_V24_3_6_LOADED__) {
+  console.warn('[Splash] Footer already loaded — skipping duplicate init');
+} else {
+  window.__SPLASH_FOOTER_V24_3_6_LOADED__ = true;
+
+  document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      CONFIG
@@ -2982,3 +2988,4 @@ return;
     });
   });
 });
+}
