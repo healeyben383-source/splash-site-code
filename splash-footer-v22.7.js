@@ -2730,7 +2730,21 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
     }
 
     formEl.addEventListener('submit', async (event) => {
-      event.preventDefault();
+  event.preventDefault();
+
+  // ✅ V24.3.22 ADD-ONLY — stop other submit handlers (Webflow/extensions)
+  try {
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
+  } catch (_) {}
+
+  // ✅ V24.3.22 ADD-ONLY — Submit lock (prevents double-submit in some browsers/extensions)
+  if (formEl.__SPLASH_SUBMIT_LOCK__) {
+    return; // ignore duplicate submit
+  }
+  formEl.__SPLASH_SUBMIT_LOCK__ = true;
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? submitBtn.value : null;
@@ -2769,6 +2783,7 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
         }
+        formEl.__SPLASH_SUBMIT_LOCK__ = false;
         return;
       }
 
@@ -2787,6 +2802,7 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
         }
+        formEl.__SPLASH_SUBMIT_LOCK__ = false;
         return;
       }
 
@@ -2843,20 +2859,24 @@ try {
   if (!localStorage.getItem(seenKey)) {
     localStorage.setItem(seenKey, '1');
 
-    splashOpenRecoveryKeyRevealModal(viewerListId, () => {
-      window.location.href = dest;
+   splashOpenRecoveryKeyRevealModal(viewerListId, () => {
+  formEl.__SPLASH_SUBMIT_LOCK__ = false;
+  window.location.href = dest;
+});
     });
 // ✅ fallback: if modal did not mount, redirect anyway
 setTimeout(() => {
   if (!document.getElementById('splash-recovery-reveal-wrap')) {
-    window.location.href = dest;
-  }
+  formEl.__SPLASH_SUBMIT_LOCK__ = false;
+  window.location.href = dest;
+}
 }, 50);
     return; // IMPORTANT: prevent immediate redirect
   }
 } catch(e) {}
 
 // fallback: normal redirect
+formEl.__SPLASH_SUBMIT_LOCK__ = false;
 window.location.href = dest;
 return;
 
@@ -3005,6 +3025,7 @@ return;
           submitBtn.disabled = false;
           submitBtn.value = originalBtnValue || 'Submit';
         }
+    formEl.__SPLASH_SUBMIT_LOCK__ = false;
       }
     });
   });
