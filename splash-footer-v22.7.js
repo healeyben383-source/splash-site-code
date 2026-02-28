@@ -2718,7 +2718,7 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
   /* =========================
      FORM SUBMISSION (OVERWRITE)
   ========================== */
-  document.querySelectorAll('form').forEach((formEl) => {
+  document.querySelectorAll('form[splash-submit="js-only"]').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
 
     const category = (formEl.getAttribute('data-category') || 'items').trim().toLowerCase();
@@ -2730,7 +2730,12 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
     }
 
     formEl.addEventListener('submit', async (event) => {
-      event.preventDefault();
+    event.preventDefault();
+
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? submitBtn.value : null;
