@@ -2830,14 +2830,15 @@ return;
 
         }
 
-      const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
+ const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
   p_recovery_key: key,
   p_category: category,
   p_v1: newValues[0] || null,
   p_v2: newValues[1] || null,
   p_v3: newValues[2] || null,
   p_v4: newValues[3] || null,
-  p_v5: newValues[4] || null
+  p_v5: newValues[4] || null,
+  p_list_id: viewerListId || null
 });
 
 if (wErr) throw wErr;
