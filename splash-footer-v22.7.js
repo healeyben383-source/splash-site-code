@@ -1,13 +1,7 @@
 // Baseline: V24.3.6
 // Change: Island update toast is now content-change–based (no-op submits no longer trigger it)
 
-// ✅ SPLASH FOOTER RUN-ONCE GUARD — V24.3.21 (ADD-ONLY)
-if (window.__SPLASH_FOOTER_V24_3_6_LOADED__) {
-  console.warn('[Splash] Footer already loaded — skipping duplicate init');
-} else {
-  window.__SPLASH_FOOTER_V24_3_6_LOADED__ = true;
-
-  document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
 
   /* =========================
      CONFIG
@@ -216,10 +210,7 @@ try {
 
     wrap.appendChild(card);
     document.body.appendChild(wrap);
-  } catch(e) {
-  // ✅ FAIL-OPEN: if modal can't render, continue flow (redirect happens via onDone)
-  try { onDone && onDone(); } catch(_) {}
-}
+  } catch(e) {}
 }
   
 function splashOpenRecoveryModal(){
@@ -1082,22 +1073,15 @@ function initHomeIslandGateHybrid(viewerListId){
 
   // ✅ Note: V24.3.6 keeps your existing behavior. If you want true UUID-only here later, we can tighten it.
   function getOrCreateListId() {
-  let id = null;
-  try { id = localStorage.getItem(LIST_ID_KEY); } catch(e) {}
-
-  // If it's not a UUID, treat as missing (self-heal)
-  id = uuidOrNull(id);
-
-  if (!id) {
-    id = (window.crypto && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : uuidv4Fallback();
-
-    try { localStorage.setItem(LIST_ID_KEY, id); } catch(e) {}
+    let id = localStorage.getItem(LIST_ID_KEY);
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now() + '-' + Math.random().toString(16).slice(2));
+      localStorage.setItem(LIST_ID_KEY, id);
+    }
+    return id;
   }
-
-  return id;
-}
 
   const viewerListId = getOrCreateListId();
   
@@ -2461,23 +2445,12 @@ if (!canon) return;
  /* =========================
    RESULTS PAGE (render lists)
 ========================== */
-  if (isResultsPage()) {
-
-    const RESULTS_SUBLABEL_OVERRIDES = {
-      'games-video': 'Video Games'
-    };
-
-    const getSubFromCategory = (category) => {
-  const raw = String(category || '').trim().toLowerCase();
-
-  if (RESULTS_SUBLABEL_OVERRIDES[raw]) {
-    return RESULTS_SUBLABEL_OVERRIDES[raw];
-  }
-
-  const parts = raw.split('-');
-  if (parts.length <= 1) return '';
-  return toTitleCase(parts.slice(1).join(' '));
-};
+if (isResultsPage()) {
+  const getSubFromCategory = (category) => {
+    const parts = (category || '').split('-');
+    if (parts.length <= 1) return '';
+    return toTitleCase(parts.slice(1).join(' '));
+  };
 
   const setResultsCopy = () => {
     const category = urlParams.get('category') || '';
@@ -2718,7 +2691,7 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
   /* =========================
      FORM SUBMISSION (OVERWRITE)
   ========================== */
-  document.querySelectorAll('form[splash-submit="js-only"]').forEach((formEl) => {
+  document.querySelectorAll('form').forEach((formEl) => {
     if (!formEl.querySelector('input[name="rank1"]')) return;
 
     const category = (formEl.getAttribute('data-category') || 'items').trim().toLowerCase();
@@ -2730,12 +2703,7 @@ let canonMeta = resolvedMeta.canon || canonicalFromDisplay(dispMeta);
     }
 
     formEl.addEventListener('submit', async (event) => {
-    event.preventDefault();
-
-    event.stopPropagation();
-    if (typeof event.stopImmediatePropagation === 'function') {
-      event.stopImmediatePropagation();
-    }
+      event.preventDefault();
 
       const submitBtn = formEl.querySelector('[type="submit"]');
       const originalBtnValue = submitBtn ? submitBtn.value : null;
@@ -2851,12 +2819,7 @@ try {
     splashOpenRecoveryKeyRevealModal(viewerListId, () => {
       window.location.href = dest;
     });
-// ✅ fallback: if modal did not mount, redirect anyway
-setTimeout(() => {
-  if (!document.getElementById('splash-recovery-reveal-wrap')) {
-    window.location.href = dest;
-  }
-}, 50);
+
     return; // IMPORTANT: prevent immediate redirect
   }
 } catch(e) {}
@@ -2867,7 +2830,7 @@ return;
 
         }
 
-  const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
+      const { data: wData, error: wErr } = await supabase.rpc('upsert_list_with_recovery_key', {
   p_recovery_key: key,
   p_category: category,
   p_v1: newValues[0] || null,
@@ -2878,16 +2841,8 @@ return;
 });
 
 if (wErr) throw wErr;
-
-// ✅ Coerce RPC shape (array OR object OR null)
-const out = Array.isArray(wData) ? (wData[0] || null) : (wData || null);
-
-// If RPC returns nothing on success, treat as success
-if (out == null) {
-  // success
-} else {
-  if (out.ok === false) throw new Error(out.error || 'save_failed');
-  // otherwise treat as success
+if (!wData || (wData.ok === false)) {
+  throw new Error((wData && wData.error) ? wData.error : 'save_failed');
 }
 
 
@@ -2967,12 +2922,7 @@ try {
     splashOpenRecoveryKeyRevealModal(viewerListId, () => {
       window.location.href = dest;
     });
-// ✅ fallback: if modal did not mount, redirect anyway
-setTimeout(() => {
-  if (!document.getElementById('splash-recovery-reveal-wrap')) {
-    window.location.href = dest;
-  }
-}, 50);
+
     return; // IMPORTANT — prevents immediate redirect
   }
 } catch(e) {}
@@ -3014,4 +2964,3 @@ return;
     });
   });
 });
-}
